@@ -1,0 +1,63 @@
+# PPI Docking 配置文件
+
+preprocessing:
+  remove_water: true
+  remove_hetatm: true
+  remove_ions: true
+  add_hydrogens: true
+  standardize_names: true
+  probe_radius: 1.4  # Å, SASA 探针半径
+
+surface:
+  sasa_threshold: 25.0  # Å², 表面残基 SASA 阈值
+  neighbor_radius: 8.0  # Å
+  neighbor_density_threshold: 0.15
+
+docking:
+  coarse_rotations: 12
+  coarse_translations: 5
+  translation_step: 5.0  # Å
+  mc_iterations: 200
+  mc_temperature: 2.0
+  contact_distance: 5.0  # Å
+  clash_distance: 2.0  # Å
+  top_n_poses: 10
+  grid_search: true
+  monte_carlo: true
+
+scoring:
+  weights:
+    hydrophobic: 0.25
+    electrostatic: 0.20
+    contacts: 0.25
+    interface_area: 0.20
+    clash_penalty: 0.10
+  contact_cutoff: 5.0
+  hbond_distance: 3.5
+  hydrophobic_residues:
+    - ALA
+    - VAL
+    - LEU
+    - ILE
+    - MET
+    - PHE
+    - TRP
+    - PRO
+
+ppi_prediction:
+  interaction_threshold: 0.5
+  min_interface_area: 400.0  # Å²
+  min_contact_residues: 8
+  model_type: random_forest
+
+evaluation:
+  positive_pairs: 15
+  negative_pairs: 8
+  contact_cutoff: 5.0
+  fnat_cutoff: 5.0
+
+output:
+  results_dir: results
+  save_poses: true
+  generate_plots: true
+  generate_report: true
