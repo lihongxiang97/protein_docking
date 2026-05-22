@@ -271,4 +271,3 @@ A: 支持，通过 `--receptor-chains` 和 `--ligand-chains` 指定。
 本软件仅供科研与学习使用。算法思想参考了蛋白对接领域的经典方法（如 FFT docking、CAPRI 评估标准），但所有代码均为自主实现。
 
 MIT License
-# protein_docking
