@@ -4,12 +4,15 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 # 标准氨基酸
 STANDARD_AA = {
@@ -29,6 +32,8 @@ VDW_RADIUS = {
     "H": 1.20, "C": 1.70, "N": 1.55, "O": 1.52, "S": 1.80, "P": 1.80,
     "DEFAULT": 1.70,
 }
+
+CHAIN_ID_POOL = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyz"
 
 # 残基标准原子 (用于 SASA)
 RESIDUE_ATOMS = {
@@ -82,8 +87,8 @@ class Atom:
         self.x, self.y, self.z = float(value[0]), float(value[1]), float(value[2])
 
     @property
-    def residue_key(self) -> Tuple[str, int, str]:
-        return (self.chain_id, self.resseq, self.resname)
+    def residue_key(self) -> Tuple[str, int, str, str]:
+        return (self.chain_id, self.resseq, self.icode, self.resname)
 
     def vdw_radius(self) -> float:
         elem = self.element.upper() if self.element else self.name[0]
@@ -103,8 +108,8 @@ class Residue:
     charge: float = 0.0
 
     @property
-    def key(self) -> Tuple[str, int, str]:
-        return (self.chain_id, self.resseq, self.resname)
+    def key(self) -> Tuple[str, int, str, str]:
+        return (self.chain_id, self.resseq, self.icode, self.resname)
 
     @property
     def ca_coord(self) -> Optional[np.ndarray]:
@@ -128,7 +133,7 @@ class ProteinStructure:
     """蛋白质结构。"""
     name: str
     atoms: List[Atom] = field(default_factory=list)
-    residues: Dict[Tuple[str, int, str], Residue] = field(default_factory=dict)
+    residues: Dict[Tuple[str, int, str, str], Residue] = field(default_factory=dict)
     chains: Set[str] = field(default_factory=set)
 
     @property
@@ -170,7 +175,7 @@ class ProteinStructure:
     def write_pdb(self, path: Path) -> None:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             f.writelines(self.to_pdb_lines())
 
 
@@ -186,16 +191,22 @@ class PDBParser:
     @classmethod
     def parse(cls, pdb_path: Path, structure_name: str = "") -> ProteinStructure:
         pdb_path = Path(pdb_path)
+        if not pdb_path.exists():
+            raise FileNotFoundError(f"PDB file does not exist: {pdb_path}")
         name = structure_name or pdb_path.stem
         structure = ProteinStructure(name=name)
         residue_map: Dict[Tuple, Residue] = {}
+        skipped = 0
 
-        with open(pdb_path) as f:
+        with open(pdb_path, encoding="utf-8", errors="replace") as f:
             for line in f:
                 if not (line.startswith("ATOM") or line.startswith("HETATM")):
                     continue
                 atom = cls._parse_atom_line(line)
                 if atom is None:
+                    skipped += 1
+                    continue
+                if atom.alt_loc not in (" ", "A"):
                     continue
                 structure.atoms.append(atom)
                 structure.chains.add(atom.chain_id)
@@ -210,6 +221,8 @@ class PDBParser:
                 residue_map[key].atoms.append(atom)
 
         structure.residues = residue_map
+        if skipped:
+            logger.warning("Skipped %d malformed atom records while parsing %s", skipped, pdb_path)
         return structure
 
     @classmethod
@@ -226,9 +239,13 @@ class PDBParser:
             x = float(line[30:38])
             y = float(line[38:46])
             z = float(line[46:54])
-            occ = float(line[54:60]) if len(line) > 54 else 1.0
-            bfac = float(line[60:66]) if len(line) > 60 else 0.0
-            element = line[76:78].strip() if len(line) > 76 else name[0]
+            occ_text = line[54:60].strip() if len(line) > 54 else ""
+            bfac_text = line[60:66].strip() if len(line) > 60 else ""
+            occ = float(occ_text) if occ_text else 1.0
+            bfac = float(bfac_text) if bfac_text else 0.0
+            element = line[76:78].strip() if len(line) > 76 else ""
+            if not element:
+                element = next((c for c in name if c.isalpha()), "C")
             return Atom(
                 serial=serial, name=name, alt_loc=alt_loc, resname=resname,
                 chain_id=chain_id, resseq=resseq, icode=icode,
@@ -244,7 +261,14 @@ def merge_structures(receptor: ProteinStructure, ligand: ProteinStructure) -> Pr
     merged = ProteinStructure(name=f"{receptor.name}_{ligand.name}")
     offset = len(receptor.atoms)
     for atom in receptor.atoms:
-        merged.atoms.append(atom)
+        merged.atoms.append(Atom(
+            serial=atom.serial,
+            name=atom.name, alt_loc=atom.alt_loc, resname=atom.resname,
+            chain_id=atom.chain_id, resseq=atom.resseq, icode=atom.icode,
+            x=atom.x, y=atom.y, z=atom.z,
+            occupancy=atom.occupancy, bfactor=atom.bfactor,
+            element=atom.element, record=atom.record,
+        ))
     for atom in ligand.atoms:
         new_atom = Atom(
             serial=atom.serial + offset,
@@ -255,6 +279,207 @@ def merge_structures(receptor: ProteinStructure, ligand: ProteinStructure) -> Pr
             element=atom.element, record=atom.record,
         )
         merged.atoms.append(new_atom)
-    merged.residues = {**receptor.residues, **ligand.residues}
-    merged.chains = receptor.chains | ligand.chains
+    for atom in merged.atoms:
+        key = atom.residue_key
+        if key not in merged.residues:
+            merged.residues[key] = Residue(
+                chain_id=atom.chain_id,
+                resseq=atom.resseq,
+                resname=atom.resname,
+                icode=atom.icode,
+            )
+        merged.residues[key].atoms.append(atom)
+        merged.chains.add(atom.chain_id)
+    _copy_residue_annotations(receptor, merged)
+    _copy_residue_annotations(ligand, merged)
     return merged
+
+
+def clone_structure(structure: ProteinStructure, name: str = "") -> ProteinStructure:
+    """深拷贝结构对象。"""
+    cloned = ProteinStructure(name=name or structure.name)
+    for atom in structure.atoms:
+        new_atom = Atom(
+            serial=atom.serial,
+            name=atom.name,
+            alt_loc=atom.alt_loc,
+            resname=atom.resname,
+            chain_id=atom.chain_id,
+            resseq=atom.resseq,
+            icode=atom.icode,
+            x=atom.x,
+            y=atom.y,
+            z=atom.z,
+            occupancy=atom.occupancy,
+            bfactor=atom.bfactor,
+            element=atom.element,
+            record=atom.record,
+        )
+        cloned.atoms.append(new_atom)
+        key = new_atom.residue_key
+        if key not in cloned.residues:
+            cloned.residues[key] = Residue(
+                chain_id=new_atom.chain_id,
+                resseq=new_atom.resseq,
+                resname=new_atom.resname,
+                icode=new_atom.icode,
+            )
+        cloned.residues[key].atoms.append(new_atom)
+        cloned.chains.add(new_atom.chain_id)
+    _copy_residue_annotations(structure, cloned)
+    return cloned
+
+
+def remap_chain_ids(
+    structure: ProteinStructure,
+    chain_mapping: Dict[str, str],
+    name: str = "",
+) -> ProteinStructure:
+    """返回链 ID 重映射后的结构副本。"""
+    if not chain_mapping:
+        return clone_structure(structure, name=name)
+
+    remapped = ProteinStructure(name=name or structure.name)
+    for atom in structure.atoms:
+        new_chain = chain_mapping.get(atom.chain_id, atom.chain_id)
+        new_atom = Atom(
+            serial=atom.serial,
+            name=atom.name,
+            alt_loc=atom.alt_loc,
+            resname=atom.resname,
+            chain_id=new_chain,
+            resseq=atom.resseq,
+            icode=atom.icode,
+            x=atom.x,
+            y=atom.y,
+            z=atom.z,
+            occupancy=atom.occupancy,
+            bfactor=atom.bfactor,
+            element=atom.element,
+            record=atom.record,
+        )
+        remapped.atoms.append(new_atom)
+        key = new_atom.residue_key
+        if key not in remapped.residues:
+            remapped.residues[key] = Residue(
+                chain_id=new_chain,
+                resseq=new_atom.resseq,
+                resname=new_atom.resname,
+                icode=new_atom.icode,
+            )
+        remapped.residues[key].atoms.append(new_atom)
+        remapped.chains.add(new_chain)
+    _copy_residue_annotations(structure, remapped, chain_mapping)
+    return remapped
+
+
+def ensure_unique_chain_ids(
+    structure: ProteinStructure,
+    occupied_chain_ids: Iterable[str],
+    name: str = "",
+) -> ProteinStructure:
+    """确保结构链 ID 与已占用链集合不冲突。"""
+    occupied = set(occupied_chain_ids)
+    chain_mapping: Dict[str, str] = {}
+    available_ids = [cid for cid in CHAIN_ID_POOL if cid not in occupied]
+
+    for chain_id in sorted(structure.chains):
+        if chain_id not in occupied and chain_id not in chain_mapping.values():
+            continue
+        if not available_ids:
+            raise ValueError("没有可用的唯一链 ID 可分配给配体结构")
+        chain_mapping[chain_id] = available_ids.pop(0)
+        occupied.add(chain_mapping[chain_id])
+
+    if not chain_mapping:
+        return clone_structure(structure, name=name)
+    return remap_chain_ids(structure, chain_mapping, name=name)
+
+
+def extract_structure_by_chains(
+    structure: ProteinStructure,
+    chains: Iterable[str],
+    invert: bool = False,
+    name: str = "",
+) -> ProteinStructure:
+    """按链筛选结构并返回副本。"""
+    selected = set(chains)
+    subset = ProteinStructure(name=name or structure.name)
+    for atom in structure.atoms:
+        keep = atom.chain_id in selected
+        if invert:
+            keep = not keep
+        if not keep:
+            continue
+        new_atom = Atom(
+            serial=atom.serial,
+            name=atom.name,
+            alt_loc=atom.alt_loc,
+            resname=atom.resname,
+            chain_id=atom.chain_id,
+            resseq=atom.resseq,
+            icode=atom.icode,
+            x=atom.x,
+            y=atom.y,
+            z=atom.z,
+            occupancy=atom.occupancy,
+            bfactor=atom.bfactor,
+            element=atom.element,
+            record=atom.record,
+        )
+        subset.atoms.append(new_atom)
+        key = new_atom.residue_key
+        if key not in subset.residues:
+            subset.residues[key] = Residue(
+                chain_id=new_atom.chain_id,
+                resseq=new_atom.resseq,
+                resname=new_atom.resname,
+                icode=new_atom.icode,
+            )
+        subset.residues[key].atoms.append(new_atom)
+        subset.chains.add(new_atom.chain_id)
+    _copy_residue_annotations(structure, subset)
+    return subset
+
+
+def _copy_residue_annotations(
+    source: ProteinStructure,
+    target: ProteinStructure,
+    chain_mapping: Optional[Dict[str, str]] = None,
+) -> None:
+    """Preserve preprocessing annotations when structures are copied or remapped."""
+    mapping = chain_mapping or {}
+    for residue in source.residues.values():
+        key = (
+            mapping.get(residue.chain_id, residue.chain_id),
+            residue.resseq,
+            residue.icode,
+            residue.resname,
+        )
+        if key not in target.residues:
+            continue
+        copied = target.residues[key]
+        copied.sasa = residue.sasa
+        copied.is_surface = residue.is_surface
+        copied.charge = residue.charge
+
+
+def split_complex_by_reference_chains(
+    complex_structure: ProteinStructure,
+    receptor_chains: Iterable[str],
+) -> Tuple[ProteinStructure, ProteinStructure]:
+    """根据受体链集合拆分复合物为受体和配体结构。"""
+    receptor_chain_ids = set(receptor_chains)
+    receptor = extract_structure_by_chains(
+        complex_structure,
+        receptor_chain_ids,
+        invert=False,
+        name=f"{complex_structure.name}_receptor",
+    )
+    ligand = extract_structure_by_chains(
+        complex_structure,
+        receptor_chain_ids,
+        invert=True,
+        name=f"{complex_structure.name}_ligand",
+    )
+    return receptor, ligand

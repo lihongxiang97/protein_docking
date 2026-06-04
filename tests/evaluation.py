@@ -123,7 +123,7 @@ class EvaluationReport:
         cls_metrics: Dict[str, float],
         dock_metrics: Dict[str, float],
     ) -> None:
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             f.write("# PPI Docking Benchmark Evaluation Report\n\n")
             f.write(f"**Generated**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
             f.write(f"**Total test cases**: {len(results)}\n")

@@ -1,0 +1,46 @@
+{
+  "source": "RCSB Protein Data Bank",
+  "default_example_id": "1AY7_rnase_sa_barstar",
+  "generated_at": "2026-05-25T10:14:04.836354+00:00",
+  "examples": [
+    {
+      "example_id": "1AY7_rnase_sa_barstar",
+      "pdb_id": "1AY7",
+      "display_name": "RNase Sa - Barstar",
+      "receptor_name": "Ribonuclease Sa",
+      "ligand_name": "Barstar",
+      "receptor_chain": "A",
+      "ligand_chain": "B",
+      "receptor_file": "1AY7_rnase_sa_barstar_receptor_A.pdb",
+      "ligand_file": "1AY7_rnase_sa_barstar_ligand_B.pdb",
+      "description": "RCSB PDB 已知互作复合物，适合作为小型蛋白-蛋白对接示例。",
+      "source_url": "https://www.rcsb.org/structure/1AY7"
+    },
+    {
+      "example_id": "1BUH_cdk2_ckshs1",
+      "pdb_id": "1BUH",
+      "display_name": "CDK2 - CksHs1",
+      "receptor_name": "Cyclin-dependent kinase 2",
+      "ligand_name": "CksHs1",
+      "receptor_chain": "A",
+      "ligand_chain": "B",
+      "receptor_file": "1BUH_cdk2_ckshs1_receptor_A.pdb",
+      "ligand_file": "1BUH_cdk2_ckshs1_ligand_B.pdb",
+      "description": "RCSB PDB 细胞周期调控相关复合物，界面相对紧凑。",
+      "source_url": "https://www.rcsb.org/structure/1BUH"
+    },
+    {
+      "example_id": "1OW3_rhoa_rhogap",
+      "pdb_id": "1OW3",
+      "display_name": "RhoA - RhoGAP",
+      "receptor_name": "Rho GTPase-activating protein",
+      "ligand_name": "Transforming protein RhoA",
+      "receptor_chain": "A",
+      "ligand_chain": "B",
+      "receptor_file": "1OW3_rhoa_rhogap_receptor_A.pdb",
+      "ligand_file": "1OW3_rhoa_rhogap_ligand_B.pdb",
+      "description": "RCSB PDB 信号转导复合物，适合演示不同形状蛋白的结合界面。",
+      "source_url": "https://www.rcsb.org/structure/1OW3"
+    }
+  ]
+}

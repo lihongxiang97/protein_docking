@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Set, Tuple
 
 import numpy as np
 import pandas as pd
-from scipy.spatial import cKDTree
+from docking.spatial import cKDTree
 
 from docking.structure import HYDROPHOBIC_AA, ProteinStructure, Residue
 
@@ -40,7 +40,7 @@ class InterfaceResult:
 class InterfaceAnalyzer:
     """互作界面残基识别与分析。"""
 
-    def __init__(self, contact_cutoff: float = 5.0, hbond_cutoff: float = 3.5):
+    def __init__(self, contact_cutoff: float = 8.0, hbond_cutoff: float = 3.5):
         self.contact_cutoff = contact_cutoff
         self.hbond_cutoff = hbond_cutoff
 
@@ -80,9 +80,11 @@ class InterfaceAnalyzer:
             ca = res.ca_coord
             if ca is None:
                 continue
-            dist, idx = lig_tree.query(ca)
-            if dist < self.contact_cutoff:
-                partner = lig_info[idx]
+            neighbor_indices = lig_tree.query_ball_point(ca, self.contact_cutoff)
+            if neighbor_indices:
+                partners = [(lig_info[idx], float(np.linalg.norm(ca - lig_ca[idx]))) for idx in neighbor_indices]
+                partners.sort(key=lambda item: item[1])
+                partner, dist = partners[0]
                 contact_type = self._classify_contact(res, partner, dist)
                 iface = InterfaceResidue(
                     chain_id=res.chain_id,
@@ -92,16 +94,16 @@ class InterfaceAnalyzer:
                     min_distance=dist,
                     contact_type=contact_type,
                     partner_residues=[
-                        f"{partner.resname}{partner.resseq}"
+                        f"{p.resname}{p.resseq}" for p, _ in partners
                     ],
                 )
                 result.receptor_interface.append(iface)
-                pair_label = (
-                    f"{res.chain_id}:{res.resname}{res.resseq}",
-                    f"{partner.chain_id}:{partner.resname}{partner.resseq}",
-                    dist,
-                )
-                result.contact_pairs.append(pair_label)
+                for partner_res, partner_dist in partners:
+                    result.contact_pairs.append((
+                        f"{res.chain_id}:{res.resname}{res.resseq}",
+                        f"{partner_res.chain_id}:{partner_res.resname}{partner_res.resseq}",
+                        partner_dist,
+                    ))
 
         # 配体侧界面
         rec_ca = []
@@ -118,9 +120,11 @@ class InterfaceAnalyzer:
                 ca = res.ca_coord
                 if ca is None:
                     continue
-                dist, idx = rec_tree.query(ca)
-                if dist < self.contact_cutoff:
-                    partner = rec_info[idx]
+                neighbor_indices = rec_tree.query_ball_point(ca, self.contact_cutoff)
+                if neighbor_indices:
+                    partners = [(rec_info[idx], float(np.linalg.norm(ca - rec_ca[idx]))) for idx in neighbor_indices]
+                    partners.sort(key=lambda item: item[1])
+                    partner, dist = partners[0]
                     contact_type = self._classify_contact(res, partner, dist)
                     result.ligand_interface.append(InterfaceResidue(
                         chain_id=res.chain_id,
@@ -129,7 +133,7 @@ class InterfaceAnalyzer:
                         partner_chain=partner.chain_id,
                         min_distance=dist,
                         contact_type=contact_type,
-                        partner_residues=[f"{partner.resname}{partner.resseq}"],
+                        partner_residues=[f"{p.resname}{p.resseq}" for p, _ in partners],
                     ))
 
         result.n_interface_residues = (
@@ -205,7 +209,7 @@ class InterfaceAnalyzer:
         for iface in result.ligand_interface:
             lines.append(f"{iface.resname}{iface.resseq} ({iface.contact_type}, d={iface.min_distance:.2f}Å)\n")
 
-        with open(output_path, "w") as f:
+        with open(output_path, "w", encoding="utf-8") as f:
             f.writelines(lines)
 
     def to_dataframe(self, result: InterfaceResult) -> pd.DataFrame:

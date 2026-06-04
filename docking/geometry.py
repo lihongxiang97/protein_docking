@@ -8,12 +8,15 @@ import math
 from typing import List, Tuple
 
 import numpy as np
-from scipy.spatial import cKDTree
+from docking.spatial import cKDTree
 
 
 def quaternion_to_matrix(q: np.ndarray) -> np.ndarray:
     """四元数 [w, x, y, z] 转 3x3 旋转矩阵。"""
-    w, x, y, z = q / np.linalg.norm(q)
+    norm = np.linalg.norm(q)
+    if not np.isfinite(norm) or norm < 1e-12:
+        raise ValueError("Quaternion must have a finite, non-zero norm")
+    w, x, y, z = q / norm
     return np.array([
         [1 - 2*y*y - 2*z*z, 2*x*y - 2*z*w, 2*x*z + 2*y*w],
         [2*x*y + 2*z*w, 1 - 2*x*x - 2*z*z, 2*y*z - 2*x*w],
@@ -67,6 +70,29 @@ def grid_rotations(n: int = 12) -> List[np.ndarray]:
     return matrices[:n]
 
 
+def uniform_rotations(n: int = 48) -> List[np.ndarray]:
+    """Generate deterministic low-discrepancy rotations over SO(3)."""
+    if n < 1:
+        raise ValueError("Rotation count must be positive")
+    rotations = [np.eye(3)]
+    golden_a = (math.sqrt(5.0) - 1.0) / 2.0
+    golden_b = math.sqrt(2.0) - 1.0
+    for index in range(1, n):
+        u1 = (index + 0.5) / n
+        u2 = (index * golden_a) % 1.0
+        u3 = (index * golden_b) % 1.0
+        quaternion = np.array(
+            [
+                math.sqrt(u1) * math.cos(2.0 * math.pi * u3),
+                math.sqrt(1.0 - u1) * math.sin(2.0 * math.pi * u2),
+                math.sqrt(1.0 - u1) * math.cos(2.0 * math.pi * u2),
+                math.sqrt(u1) * math.sin(2.0 * math.pi * u3),
+            ]
+        )
+        rotations.append(quaternion_to_matrix(quaternion))
+    return rotations
+
+
 def apply_transform(
     coords: np.ndarray,
     center: np.ndarray,
@@ -74,6 +100,16 @@ def apply_transform(
     translation: np.ndarray,
 ) -> np.ndarray:
     """对坐标应用绕 center 旋转后平移。"""
+    coords = np.asarray(coords, dtype=float)
+    center = np.asarray(center, dtype=float)
+    rotation = np.asarray(rotation, dtype=float)
+    translation = np.asarray(translation, dtype=float)
+    if coords.ndim != 2 or coords.shape[1:] != (3,):
+        raise ValueError("coords must have shape (N, 3)")
+    if rotation.shape != (3, 3) or center.shape != (3,) or translation.shape != (3,):
+        raise ValueError("Invalid rigid transform dimensions")
+    if not all(np.all(np.isfinite(value)) for value in (coords, center, rotation, translation)):
+        raise ValueError("Rigid transform inputs must be finite")
     shifted = coords - center
     rotated = (rotation @ shifted.T).T
     return rotated + center + translation
@@ -100,7 +136,7 @@ def count_clashes(
         for j in neighbors:
             dist = np.linalg.norm(ca - coords_b[j])
             min_dist = ra + radii_b[j]
-            if dist < min_dist * 0.85:  # 85% VdW 和视为严重碰撞
+            if dist < max(0.0, min_dist - max(0.0, clash_cutoff)):
                 clash_count += 1
     return clash_count
 

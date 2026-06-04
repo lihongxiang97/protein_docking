@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Set
 
 import numpy as np
-import yaml
+from docking.config import load_config
 
 from docking.structure import (
     STANDARD_AA,
@@ -62,14 +62,7 @@ class StructurePreprocessor:
         )
 
     def _load_config(self, config_path: Optional[Path]) -> dict:
-        if config_path and Path(config_path).exists():
-            with open(config_path) as f:
-                return yaml.safe_load(f)
-        default = Path(__file__).parent.parent / "config.yaml"
-        if default.exists():
-            with open(default) as f:
-                return yaml.safe_load(f)
-        return {}
+        return load_config(config_path)
 
     def validate_structure(self, pdb_path: Path) -> ValidationReport:
         """检查结构完整性。"""
@@ -126,9 +119,15 @@ class StructurePreprocessor:
         """
         pdb_path = Path(pdb_path)
         structure = PDBParser.parse(pdb_path)
+        if not structure.atoms:
+            raise ValueError(f"No ATOM/HETATM records could be parsed from {pdb_path}")
 
         if chain_ids:
             structure = self._select_chains(structure, chain_ids)
+            if not structure.atoms:
+                raise ValueError(
+                    f"None of the requested chains {chain_ids} were found in {pdb_path}"
+                )
 
         if self.remove_water:
             structure = self._remove_by_resname(structure, WATER_NAMES)
@@ -138,6 +137,8 @@ class StructurePreprocessor:
 
         if self.remove_hetatm and not keep_hetatm:
             structure = self._remove_hetatm(structure)
+            if not structure.atoms:
+                raise ValueError(f"No standard protein atoms remain after preprocessing {pdb_path}")
 
         if self.standardize_names:
             structure = self._standardize_atom_names(structure)

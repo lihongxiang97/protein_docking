@@ -7,13 +7,6 @@ Protein-Protein Interaction (PPI) Docking Package.
 __version__ = "1.0.0"
 __author__ = "PPI Docking Team"
 
-from docking.preprocess import StructurePreprocessor
-from docking.docking import ProteinDocker
-from docking.scoring import DockingScorer
-from docking.interface import InterfaceAnalyzer
-from docking.ppi_predictor import PPIPredictor
-from docking.visualization import ResultVisualizer
-
 __all__ = [
     "StructurePreprocessor",
     "ProteinDocker",
@@ -22,3 +15,24 @@ __all__ = [
     "PPIPredictor",
     "ResultVisualizer",
 ]
+
+_LAZY_IMPORTS = {
+    "StructurePreprocessor": ("docking.preprocess", "StructurePreprocessor"),
+    "ProteinDocker": ("docking.docking", "ProteinDocker"),
+    "DockingScorer": ("docking.scoring", "DockingScorer"),
+    "InterfaceAnalyzer": ("docking.interface", "InterfaceAnalyzer"),
+    "PPIPredictor": ("docking.ppi_predictor", "PPIPredictor"),
+    "ResultVisualizer": ("docking.visualization", "ResultVisualizer"),
+}
+
+
+def __getattr__(name):
+    """Load public components only when requested."""
+    if name not in _LAZY_IMPORTS:
+        raise AttributeError(name)
+    from importlib import import_module
+
+    module_name, attribute_name = _LAZY_IMPORTS[name]
+    value = getattr(import_module(module_name), attribute_name)
+    globals()[name] = value
+    return value

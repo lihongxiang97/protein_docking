@@ -53,7 +53,7 @@ class BenchmarkRunner:
     def __init__(self, config_path: Path, project_root: Path):
         self.config_path = Path(config_path)
         self.project_root = Path(project_root)
-        with open(self.config_path) as f:
+        with open(self.config_path, encoding="utf-8") as f:
             self.config = yaml.safe_load(f)
         self.data_dir = self.project_root / "data" / "benchmark"
         self.results_dir = self.project_root / "results" / "benchmark"
@@ -89,26 +89,22 @@ class BenchmarkRunner:
                 best = poses[0]
                 lig_struct = ligand
                 if best.complex_structure:
-                    rec_chains = receptor.chains
-                    from docking.structure import ProteinStructure, Residue, Atom
-                    lig_atoms = [a for a in best.complex_structure.atoms if a.chain_id not in rec_chains]
-                    lig_struct = ProteinStructure(name="lig", atoms=lig_atoms)
-                    for atom in lig_atoms:
-                        key = atom.residue_key
-                        if key not in lig_struct.residues:
-                            lig_struct.residues[key] = Residue(
-                                chain_id=atom.chain_id, resseq=atom.resseq,
-                                resname=atom.resname,
-                            )
-                        lig_struct.residues[key].atoms.append(atom)
+                    from docking.structure import split_complex_by_reference_chains
+                    _, lig_struct = split_complex_by_reference_chains(
+                        best.complex_structure,
+                        receptor.chains,
+                    )
 
                 interface = interface_analyzer.analyze(receptor, lig_struct)
                 ppi = predictor.predict(best.scores, interface, receptor, lig_struct)
 
                 rmsd, fnat, dockq = None, None, None
                 if pair.label == 1 and pair.native_complex_path:
-                    rmsd, fnat, dockq = self._compute_docking_metrics(
-                        best, pair.native_complex_path
+                    rmsd, fnat, dockq = self._compute_standard_metrics(
+                        best,
+                        pair.native_complex_path,
+                        pair.receptor_chain,
+                        pair.ligand_chain,
                     )
 
                 result = BenchmarkResult(
@@ -133,8 +129,12 @@ class BenchmarkRunner:
         self._save_results(results)
         return results
 
-    def _compute_docking_metrics(
-        self, pose, native_pdb: Path
+    def _compute_legacy_docking_metrics(
+        self,
+        pose,
+        native_pdb: Path,
+        receptor_chain: str,
+        ligand_chain: str,
     ) -> tuple:
         """计算 RMSD, FNAT, DockQ (简化)。"""
         try:
@@ -169,6 +169,31 @@ class BenchmarkRunner:
         except Exception:
             return None, None, None
 
+    def _compute_standard_metrics(
+        self,
+        pose,
+        native_pdb: Path,
+        receptor_chain: str,
+        ligand_chain: str,
+    ) -> tuple:
+        """Compute receptor-aligned LRMSD, native-contact fraction, and DockQ."""
+        try:
+            from docking.metrics import evaluate_complex
+            from docking.structure import PDBParser
+
+            if pose.complex_structure is None:
+                return None, None, None
+            quality = evaluate_complex(
+                PDBParser.parse(native_pdb),
+                pose.complex_structure,
+                {receptor_chain},
+                {ligand_chain},
+            )
+            return quality.lrmsd, quality.fnat, quality.dockq
+        except Exception as exc:
+            logger.warning("Docking metric calculation failed for %s: %s", native_pdb, exc)
+            return None, None, None
+
     def _save_results(self, results: List[BenchmarkResult]) -> None:
         import pandas as pd
         rows = [
@@ -189,5 +214,5 @@ class BenchmarkRunner:
         ]
         df = pd.DataFrame(rows)
         df.to_csv(self.results_dir / "benchmark_results.csv", index=False)
-        with open(self.results_dir / "benchmark_results.json", "w") as f:
+        with open(self.results_dir / "benchmark_results.json", "w", encoding="utf-8") as f:
             json.dump(rows, f, indent=2)

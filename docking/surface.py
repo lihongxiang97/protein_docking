@@ -7,7 +7,7 @@ from __future__ import annotations
 from typing import Dict, List, Set, Tuple
 
 import numpy as np
-from scipy.spatial import cKDTree
+from docking.spatial import cKDTree
 
 from docking.structure import (
     HYDROPHOBIC_AA,
@@ -79,13 +79,14 @@ class SurfaceAnalyzer:
 
         # 聚合到残基
         residue_sasa: Dict[Tuple, float] = {}
-        atom_idx = 0
+        atom_indices: Dict[Tuple, List[int]] = {}
+        for index, atom in enumerate(structure.atoms):
+            atom_indices.setdefault(atom.residue_key, []).append(index)
         for res in structure.get_residue_list():
-            n_atoms = len(res.atoms)
-            res_sasa = atom_sasa[atom_idx:atom_idx + n_atoms].sum()
+            indices = atom_indices.get(res.key, [])
+            res_sasa = float(atom_sasa[indices].sum()) if indices else 0.0
             residue_sasa[res.key] = res_sasa
             res.sasa = res_sasa
-            atom_idx += n_atoms
 
         return residue_sasa
 

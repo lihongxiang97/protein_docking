@@ -16,17 +16,17 @@ import sys
 from pathlib import Path
 
 import pandas as pd
-import yaml
 
 # 项目根目录
 PROJECT_ROOT = Path(__file__).parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from docking.docking import ProteinDocker
+from docking.config import load_config as load_validated_config
 from docking.interface import InterfaceAnalyzer
 from docking.ppi_predictor import PPIPredictor
 from docking.preprocess import StructurePreprocessor
-from docking.visualization import ResultVisualizer
+from docking.structure import split_complex_by_reference_chains
 
 logging.basicConfig(
     level=logging.INFO,
@@ -35,15 +35,22 @@ logging.basicConfig(
 logger = logging.getLogger("ppi_docking")
 
 
+def _split_csv(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
 def load_config(config_path: Path) -> dict:
-    with open(config_path) as f:
-        return yaml.safe_load(f)
+    return load_validated_config(config_path)
 
 
 def run_docking(args: argparse.Namespace) -> int:
     """执行对接分析。"""
     config_path = Path(args.config) if args.config else PROJECT_ROOT / "config.yaml"
-    config = load_config(config_path)
+    try:
+        config = load_config(config_path)
+    except Exception as exc:
+        logger.error("Failed to load config %s: %s", config_path, exc)
+        return 1
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -68,12 +75,36 @@ def run_docking(args: argparse.Namespace) -> int:
                 lig_report.n_atoms, lig_report.chains, lig_report.protein_type)
 
     # 对接
-    docker = ProteinDocker(config_path)
-    poses, receptor, ligand = docker.dock(
-        receptor_path, ligand_path, output_dir,
-        receptor_chains=args.receptor_chains.split(",") if args.receptor_chains else None,
-        ligand_chains=args.ligand_chains.split(",") if args.ligand_chains else None,
-    )
+    try:
+        docker = ProteinDocker(config_path)
+        docker.top_n = args.top_n
+        if args.blind:
+            docker.include_input_pose = False
+            docker.input_pose_bonus = 0.0
+        if args.rotations is not None:
+            docker.coarse_rotations = args.rotations
+        if args.mc_iterations is not None:
+            docker.mc_iterations = args.mc_iterations
+        if args.receptor_active or args.ligand_active:
+            if not args.receptor_active or not args.ligand_active:
+                raise ValueError(
+                    "--receptor-active and --ligand-active must be provided together"
+                )
+            docker.scorer.restraints = {
+                "enabled": True,
+                "receptor_active": _split_csv(args.receptor_active),
+                "ligand_active": _split_csv(args.ligand_active),
+                "target_distance": args.restraint_target,
+                "upper_distance": args.restraint_upper,
+            }
+        poses, receptor, ligand = docker.dock(
+            receptor_path, ligand_path, output_dir,
+            receptor_chains=[c.strip() for c in args.receptor_chains.split(",") if c.strip()] if args.receptor_chains else None,
+            ligand_chains=[c.strip() for c in args.ligand_chains.split(",") if c.strip()] if args.ligand_chains else None,
+        )
+    except Exception as exc:
+        logger.exception("Docking failed: %s", exc)
+        return 1
 
     if not poses:
         logger.error("未找到有效对接构象")
@@ -86,20 +117,7 @@ def run_docking(args: argparse.Namespace) -> int:
     interface_analyzer = InterfaceAnalyzer()
     ligand_docked = best_pose.complex_structure
     if ligand_docked:
-        # 从复合物分离配体部分
-        rec_chains = receptor.chains
-        lig_atoms = [a for a in ligand_docked.atoms if a.chain_id not in rec_chains]
-        from docking.structure import ProteinStructure, Residue
-        lig_struct = ProteinStructure(name="ligand_docked", atoms=lig_atoms)
-        for atom in lig_atoms:
-            key = atom.residue_key
-            if key not in lig_struct.residues:
-                lig_struct.residues[key] = Residue(
-                    chain_id=atom.chain_id, resseq=atom.resseq,
-                    resname=atom.resname, icode=atom.icode,
-                )
-            lig_struct.residues[key].atoms.append(atom)
-        lig_struct.chains = {a.chain_id for a in lig_atoms}
+        _, lig_struct = split_complex_by_reference_chains(ligand_docked, receptor.chains)
     else:
         lig_struct = ligand
 
@@ -118,6 +136,8 @@ def run_docking(args: argparse.Namespace) -> int:
 
     # 可视化
     if not args.no_plots:
+        from docking.visualization import ResultVisualizer
+
         visualizer = ResultVisualizer(output_dir / "plots")
         visualizer.generate_all_plots(poses, interface, best_pose)
         if best_pose.complex_structure:
@@ -140,7 +160,13 @@ def _save_results(output_dir, poses, interface, ppi_result, interface_analyzer):
     # 对接评分
     score_rows = []
     for pose in poses:
-        row = {"rank": pose.rank, **pose.scores.to_dict()}
+        row = {
+            "rank": pose.rank,
+            "search_score": pose.search_score,
+            "cluster_size": pose.cluster_size,
+            "provenance": pose.provenance,
+            **pose.scores.to_dict(),
+        }
         score_rows.append(row)
     pd.DataFrame(score_rows).to_csv(output_dir / "docking_scores.csv", index=False)
 
@@ -150,7 +176,7 @@ def _save_results(output_dir, poses, interface, ppi_result, interface_analyzer):
     interface_analyzer.save_interface_report(interface, output_dir / "interface_residues.txt")
 
     # 互作摘要
-    with open(output_dir / "interaction_summary.txt", "w") as f:
+    with open(output_dir / "interaction_summary.txt", "w", encoding="utf-8") as f:
         f.write("=" * 60 + "\n")
         f.write("PPI Docking - Interaction Summary\n")
         f.write("=" * 60 + "\n\n")
@@ -171,7 +197,7 @@ def _generate_summary_report(output_dir, poses, interface, ppi_result, rec_repor
     """生成 Markdown 报告。"""
     report_path = output_dir / "docking_report.md"
     best = poses[0] if poses else None
-    with open(report_path, "w") as f:
+    with open(report_path, "w", encoding="utf-8") as f:
         f.write("# PPI Docking Analysis Report\n\n")
         f.write("## 1. Input Structures\n\n")
         f.write(f"- **Receptor**: {rec_report.pdb_path} ({rec_report.n_residues} residues)\n")
@@ -243,6 +269,13 @@ def main():
     parser.add_argument("--receptor-chains", type=str, help="受体链 ID (逗号分隔)")
     parser.add_argument("--ligand-chains", type=str, help="配体链 ID (逗号分隔)")
     parser.add_argument("--top-n", type=int, default=10, help="输出 Top N 构象")
+    parser.add_argument("--blind", action="store_true", help="禁用输入相对构象先验，执行纯盲搜")
+    parser.add_argument("--rotations", type=int, help="覆盖全局旋转采样数量")
+    parser.add_argument("--mc-iterations", type=int, help="覆盖局部精修迭代数")
+    parser.add_argument("--receptor-active", type=str, help="受体活性残基，如 A:12,A:45")
+    parser.add_argument("--ligand-active", type=str, help="配体活性残基，如 B:8,B:19")
+    parser.add_argument("--restraint-target", type=float, default=6.0)
+    parser.add_argument("--restraint-upper", type=float, default=10.0)
     parser.add_argument("--no-plots", action="store_true", help="跳过图表生成")
     parser.add_argument("--benchmark", action="store_true", help="运行 benchmark 测试")
     parser.add_argument("--no-download", action="store_true", help="不下载 benchmark 数据")

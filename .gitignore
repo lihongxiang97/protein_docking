@@ -1,0 +1,27 @@
+# Python caches and local environments
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Runtime output and logs
+results/*
+!results/.gitkeep
+*.log
+
+# Downloaded/generated data caches
+data/benchmark/
+data/example_pdb/raw/
+
+# Local editor and downloaded frontend artifacts
+.trae/
+/app.js
+*Zone.Identifier
+
+# OS metadata
+.DS_Store
+Thumbs.db

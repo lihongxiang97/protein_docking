@@ -14,7 +14,8 @@ surface:
   neighbor_density_threshold: 0.15
 
 docking:
-  coarse_rotations: 12
+  search_method: fft
+  coarse_rotations: 48
   coarse_translations: 5
   translation_step: 5.0  # Å
   mc_iterations: 200
@@ -22,18 +23,43 @@ docking:
   contact_distance: 5.0  # Å
   clash_distance: 2.0  # Å
   top_n_poses: 10
+  global_candidate_limit: 120
+  refine_seeds: 4
+  cluster_rmsd: 4.0
+  max_clash_fraction: 0.40
+  include_input_pose: true
+  input_pose_bonus: 15.0
+  input_prior_decay_rmsd: 2.0
+  fft_rescore_weight: 5.0
+  random_seed: 42
   grid_search: true
   monte_carlo: true
 
+fft_search:
+  grid_spacing: 2.0
+  padding: 8.0
+  max_grid_size: 128
+  top_translations_per_rotation: 6
+  min_translation_separation: 4.0
+  shell_width: 3.0
+  core_penalty: 6.0
+  shape_weight: 1.0
+  electrostatic_weight: 0.25
+  hydrophobic_weight: 0.20
+
 scoring:
   weights:
-    hydrophobic: 0.25
-    electrostatic: 0.20
+    hydrophobic: 0.15
+    electrostatic: 0.30
     contacts: 0.25
     interface_area: 0.20
-    clash_penalty: 0.10
+    clash_penalty: 0.75
+    restraints: 0.20
   contact_cutoff: 5.0
+  residue_contact_cutoff: 8.0
   hbond_distance: 3.5
+  hbond_bonus: 0.5
+  max_hbond_bonus_count: 30
   hydrophobic_residues:
     - ALA
     - VAL
@@ -49,6 +75,13 @@ ppi_prediction:
   min_interface_area: 400.0  # Å²
   min_contact_residues: 8
   model_type: random_forest
+
+restraints:
+  enabled: false
+  receptor_active: []
+  ligand_active: []
+  target_distance: 6.0
+  upper_distance: 10.0
 
 evaluation:
   positive_pairs: 15

@@ -10,9 +10,19 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
-import yaml
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.preprocessing import StandardScaler
+from docking.config import load_config
+try:
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.preprocessing import StandardScaler
+except ImportError:
+    RandomForestClassifier = None
+
+    class StandardScaler:
+        def fit(self, X):
+            return self
+
+        def transform(self, X):
+            return np.asarray(X)
 
 from docking.interface import InterfaceAnalyzer, InterfaceResult
 from docking.scoring import ScoreComponents
@@ -69,17 +79,12 @@ class PPIPredictor:
         self.min_contact_residues = ppi_cfg.get("min_contact_residues", 8)
         self.model_type = ppi_cfg.get("model_type", "random_forest")
         self.interface_analyzer = InterfaceAnalyzer()
-        self.model: Optional[RandomForestClassifier] = None
+        self.model = None
         self.scaler = StandardScaler()
         self._is_fitted = False
 
     def _load_config(self, config_path: Optional[Path]) -> dict:
-        path = config_path or Path(__file__).parent.parent / "config.yaml"
-        path = Path(path)
-        if path.exists():
-            with open(path) as f:
-                return yaml.safe_load(f)
-        return {}
+        return load_config(config_path)
 
     def extract_features(
         self,
@@ -156,24 +161,49 @@ class PPIPredictor:
         规则评分模型 (无训练数据时使用)。
         综合界面面积、接触数、对接分、碰撞惩罚。
         """
-        score = 0.0
-        if features["interface_area"] > self.min_interface_area:
-            score += 0.25
-        if features["contact_residues"] >= self.min_contact_residues:
-            score += 0.25
-        if features["docking_score"] > 30:
-            score += 0.20
-        if features["hbond_count"] >= 3:
-            score += 0.15
-        if features["hydrophobic_ratio"] > 0.2:
-            score += 0.10
-        if features["clash_penalty"] < 10:
-            score += 0.05
+        evidence = self._compute_rule_evidence(features)
+        logit = -1.15
+        logit += 1.55 * evidence["interface_area"]
+        logit += 1.35 * evidence["contact_residues"]
+        logit += 0.85 * evidence["docking_score"]
+        logit += 0.55 * evidence["hydrogen_bonds"]
+        logit += 0.35 * evidence["hydrophobicity"]
+        logit += 0.45 * evidence["electrostatics"]
+        logit += 0.35 * evidence["contact_density"]
+        logit -= 1.20 * evidence["clash_risk"]
+        logit -= 0.45 * evidence["long_distance_risk"]
 
-        prob = min(max(score, 0.05), 0.95)
+        prob = float(np.clip(1.0 / (1.0 + np.exp(-logit)), 0.02, 0.98))
         interacts = prob >= self.interaction_threshold
         confidence = abs(prob - 0.5) * 2
         return prob, interacts, confidence
+
+    @staticmethod
+    def _bounded(value: float, low: float, high: float) -> float:
+        if high <= low:
+            return 0.0
+        return float(np.clip((value - low) / (high - low), 0.0, 1.0))
+
+    def _compute_rule_evidence(self, features: Dict[str, float]) -> Dict[str, float]:
+        return {
+            "interface_area": self._bounded(
+                features["interface_area"],
+                self.min_interface_area * 0.35,
+                self.min_interface_area * 1.8,
+            ),
+            "contact_residues": self._bounded(
+                features["contact_residues"],
+                max(1.0, self.min_contact_residues * 0.4),
+                self.min_contact_residues * 2.5,
+            ),
+            "docking_score": self._bounded(features["docking_score"], 8.0, 55.0),
+            "hydrogen_bonds": self._bounded(features["hbond_count"], 0.0, 6.0),
+            "hydrophobicity": self._bounded(features["hydrophobic_ratio"], 0.08, 0.45),
+            "electrostatics": self._bounded(features["electrostatic_score"], 0.0, 45.0),
+            "contact_density": self._bounded(features["contact_density"], 0.015, 0.12),
+            "clash_risk": self._bounded(features["clash_penalty"], 5.0, 35.0),
+            "long_distance_risk": self._bounded(features["mean_contact_distance"], 4.5, 8.0),
+        }
 
     def _generate_explanation(
         self, features: Dict[str, float], prob: float, interacts: bool
@@ -194,6 +224,10 @@ class PPIPredictor:
         n_estimators: int = 100,
     ) -> None:
         """训练 Random Forest 分类器。"""
+        if RandomForestClassifier is None:
+            raise RuntimeError("scikit-learn is required to train the Random Forest model")
+        if RandomForestClassifier is None:
+            raise RuntimeError("scikit-learn is required to train the Random Forest PPI model")
         self.scaler.fit(X)
         X_scaled = self.scaler.transform(X)
         self.model = RandomForestClassifier(

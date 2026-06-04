@@ -61,6 +61,12 @@ docker run -p 8501:8501 ppi-docking
 python scripts/generate_examples.py
 ```
 
+该命令会在 `data/example_pdb/` 下准备来自 **RCSB PDB** 的真实已知互作复合物示例，并生成：
+
+- `example_manifest.json`：示例清单与来源链接
+- `receptor.pdb` / `ligand.pdb`：默认示例对的快捷入口
+- `*_receptor_*.pdb` / `*_ligand_*.pdb`：按复合物拆分后的单链输入文件
+
 ### 命令行对接
 
 ```bash
@@ -77,6 +83,8 @@ python main.py --web
 # 或
 streamlit run web/app.py
 ```
+
+Web 端支持直接选择内置真实示例，并使用 NGL 展示完整对接复合物、界面残基 sticks、接触连线与半透明表面。
 
 ### Benchmark 测试
 

@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
-import yaml
-from scipy.spatial import cKDTree
+from docking.config import load_config
+from docking.spatial import cKDTree
 
 from docking.geometry import compute_interface_area, count_clashes, count_contacts
 from docking.structure import (
@@ -33,6 +33,9 @@ class ScoreComponents:
     hbonds: int = 0
     contact_residues: int = 0
     raw_interface_area: float = 0.0
+    restraint_score: float = 0.0
+    restraint_violations: int = 0
+    prior_score: float = 0.0
 
     def to_dict(self) -> Dict:
         return {
@@ -45,6 +48,9 @@ class ScoreComponents:
             "hbond_count": self.hbonds,
             "contact_residues": self.contact_residues,
             "interface_area_angstrom2": self.raw_interface_area,
+            "restraint_score": self.restraint_score,
+            "restraint_violations": self.restraint_violations,
+            "prior_score": self.prior_score,
         }
 
 
@@ -57,6 +63,9 @@ class DockingPose:
     scores: ScoreComponents = field(default_factory=ScoreComponents)
     ligand_coords: Optional[np.ndarray] = None
     complex_structure: Optional[ProteinStructure] = None
+    search_score: float = 0.0
+    cluster_size: int = 1
+    provenance: str = "unknown"
 
 
 class DockingScorer:
@@ -81,16 +90,17 @@ class DockingScorer:
         self.w_c = w.get("contacts", 0.25)
         self.w_a = w.get("interface_area", 0.20)
         self.w_p = w.get("clash_penalty", 0.10)
+        self.w_r = w.get("restraints", 0.20)
         self.contact_cutoff = sc.get("contact_cutoff", 5.0)
+        self.residue_contact_cutoff = sc.get("residue_contact_cutoff", 8.0)
         self.hbond_distance = sc.get("hbond_distance", 3.5)
+        self.hbond_bonus = sc.get("hbond_bonus", 0.5)
+        self.max_hbond_bonus_count = sc.get("max_hbond_bonus_count", 20)
         self.clash_cutoff = 2.0
+        self.restraints = self.config.get("restraints", {})
 
     def _load_config(self, config_path: Optional[str]) -> dict:
-        path = Path(config_path) if config_path else Path(__file__).parent.parent / "config.yaml"
-        if path.exists():
-            with open(path) as f:
-                return yaml.safe_load(f)
-        return {}
+        return load_config(Path(config_path) if config_path else None)
 
     def score_complex(
         self,
@@ -98,6 +108,8 @@ class DockingScorer:
         ligand: ProteinStructure,
     ) -> ScoreComponents:
         """对给定复合物构象评分。"""
+        if not receptor.atoms or not ligand.atoms:
+            return ScoreComponents()
         rec_coords = receptor.coords
         lig_coords = ligand.coords
         rec_radii = np.array([a.vdw_radius() for a in receptor.atoms])
@@ -129,6 +141,9 @@ class DockingScorer:
 
         # 氢键
         comp.hbonds = self._count_hbonds(receptor, ligand)
+        comp.restraint_score, comp.restraint_violations = self._score_restraints(
+            receptor, ligand
+        )
 
         # 总分
         comp.total = (
@@ -137,7 +152,8 @@ class DockingScorer:
             + self.w_c * comp.contacts
             + self.w_a * comp.interface_area
             - self.w_p * comp.clash_penalty
-            + comp.hbonds * 2.0  # 氢键奖励
+            + min(comp.hbonds, self.max_hbond_bonus_count) * self.hbond_bonus
+            + self.w_r * comp.restraint_score
         )
 
         return comp
@@ -154,20 +170,25 @@ class DockingScorer:
                 rec_keys.append(res.key)
 
         lig_ca = []
+        lig_keys = []
         for res in ligand.get_residue_list():
             ca = res.ca_coord
             if ca is not None:
                 lig_ca.append(ca)
+                lig_keys.append(res.key)
 
         if not rec_ca or not lig_ca:
             return 0
 
         tree = cKDTree(np.array(lig_ca))
-        count = 0
-        for ca in rec_ca:
-            if tree.query(ca)[0] < self.contact_cutoff:
-                count += 1
-        return count
+        rec_contacts = set()
+        lig_contacts = set()
+        for i, ca in enumerate(rec_ca):
+            neighbors = tree.query_ball_point(ca, self.residue_contact_cutoff)
+            if neighbors:
+                rec_contacts.add(rec_keys[i])
+                lig_contacts.update(lig_keys[j] for j in neighbors)
+        return len(rec_contacts) + len(lig_contacts)
 
     def _score_hydrophobic(
         self, receptor: ProteinStructure, ligand: ProteinStructure
@@ -186,7 +207,7 @@ class DockingScorer:
         tree = cKDTree(np.array(lig_hydro))
         pairs = 0
         for ca in rec_hydro:
-            if tree.query(ca)[0] < self.contact_cutoff:
+            if tree.query(ca)[0] < self.residue_contact_cutoff:
                 pairs += 1
         return min(pairs / max(len(rec_hydro), 1) * 100, 100)
 
@@ -212,11 +233,11 @@ class DockingScorer:
         score = 0.0
         for coord, charge in rec_charged:
             dist, idx = tree.query(coord)
-            if dist < self.contact_cutoff:
+            if dist < self.residue_contact_cutoff:
                 # 异性电荷互补
                 product = charge * lig_charges[idx]
                 if product < 0:
-                    score += abs(product) * (1 - dist / self.contact_cutoff)
+                    score += abs(product) * (1 - dist / self.residue_contact_cutoff)
         return min(score * 20, 100)
 
     def _count_hbonds(
@@ -225,11 +246,11 @@ class DockingScorer:
         """简化氢键检测：N/O 原子对距离 < hbond_distance。"""
         rec_polar = [
             a.coords for a in receptor.atoms
-            if a.name.strip()[0] in ("N", "O")
+            if a.name.strip() and a.name.strip()[0] in ("N", "O")
         ]
         lig_polar = [
             a.coords for a in ligand.atoms
-            if a.name.strip()[0] in ("N", "O")
+            if a.name.strip() and a.name.strip()[0] in ("N", "O")
         ]
         if not rec_polar or not lig_polar:
             return 0
@@ -241,6 +262,47 @@ class DockingScorer:
             if dist < self.hbond_distance:
                 hbonds += 1
         return hbonds
+
+    def _score_restraints(
+        self, receptor: ProteinStructure, ligand: ProteinStructure
+    ) -> Tuple[float, int]:
+        """Score ambiguous active-residue restraints against any active partner."""
+        if not self.restraints.get("enabled", False):
+            return 0.0, 0
+        receptor_labels = set(self.restraints.get("receptor_active", []))
+        ligand_labels = set(self.restraints.get("ligand_active", []))
+        if not receptor_labels or not ligand_labels:
+            return 0.0, 0
+        target = float(self.restraints.get("target_distance", 6.0))
+        upper = float(self.restraints.get("upper_distance", 10.0))
+        if upper <= target:
+            raise ValueError("restraints.upper_distance must exceed target_distance")
+        receptor_points = [
+            residue.ca_coord
+            for residue in receptor.get_residue_list()
+            if self._residue_label(residue) in receptor_labels and residue.ca_coord is not None
+        ]
+        ligand_points = [
+            residue.ca_coord
+            for residue in ligand.get_residue_list()
+            if self._residue_label(residue) in ligand_labels and residue.ca_coord is not None
+        ]
+        if not receptor_points or not ligand_points:
+            return 0.0, len(receptor_labels) + len(ligand_labels)
+        ligand_tree = cKDTree(np.asarray(ligand_points))
+        receptor_tree = cKDTree(np.asarray(receptor_points))
+        distances = [float(ligand_tree.query(point)[0]) for point in receptor_points]
+        distances.extend(float(receptor_tree.query(point)[0]) for point in ligand_points)
+        satisfaction = [
+            float(np.clip((upper - distance) / (upper - target), 0.0, 1.0))
+            for distance in distances
+        ]
+        violations = sum(distance > upper for distance in distances)
+        return float(np.mean(satisfaction) * 100.0), int(violations)
+
+    @staticmethod
+    def _residue_label(residue) -> str:
+        return f"{residue.chain_id}:{residue.resseq}"
 
     def rank_poses(self, poses: List[DockingPose]) -> List[DockingPose]:
         """按总分排序。"""
