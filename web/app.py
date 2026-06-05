@@ -560,7 +560,7 @@ with tab_dock:
         pdb_out = output_dir / f"docked_complex_{selected_rank}.pdb"
 
         if pdb_out.exists():
-            pdb_content = pdb_out.read_text()
+            pdb_content = pdb_out.read_text(encoding="utf-8", errors="replace")
             viewer_metrics = [
                 {"label": tr("docking_score"), "value": f"{selected_pose.scores.total:.1f}"},
                 {"label": tr("interaction_probability"), "value": f"{selected_ppi.probability:.1%}"},
@@ -632,7 +632,7 @@ with tab_bench:
             st.dataframe(df)
         report_path = PROJECT_ROOT / "results" / "benchmark" / "evaluation" / "evaluation_report.md"
         if report_path.exists():
-            st.markdown(report_path.read_text())
+            st.markdown(report_path.read_text(encoding="utf-8", errors="replace"))
 
 with tab_about:
     st.markdown(tr("about"))

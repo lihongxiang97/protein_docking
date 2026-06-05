@@ -13,6 +13,7 @@ __all__ = [
     "DockingScorer",
     "InterfaceAnalyzer",
     "PPIPredictor",
+    "PoseReranker",
     "ResultVisualizer",
 ]
 
@@ -22,6 +23,7 @@ _LAZY_IMPORTS = {
     "DockingScorer": ("docking.scoring", "DockingScorer"),
     "InterfaceAnalyzer": ("docking.interface", "InterfaceAnalyzer"),
     "PPIPredictor": ("docking.ppi_predictor", "PPIPredictor"),
+    "PoseReranker": ("docking.ml_reranker", "PoseReranker"),
     "ResultVisualizer": ("docking.visualization", "ResultVisualizer"),
 }
 

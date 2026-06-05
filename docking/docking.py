@@ -11,6 +11,7 @@ import numpy as np
 from docking.config import load_config
 from docking.fft_search import FFTDockingSearch
 from docking.geometry import apply_transform, count_clashes, euler_to_matrix, uniform_rotations
+from docking.ml_reranker import load_pose_reranker
 from docking.preprocess import StructurePreprocessor
 from docking.scoring import DockingPose, DockingScorer
 from docking.structure import (
@@ -49,10 +50,13 @@ class ProteinDocker:
         self.input_pose_bonus = float(dock.get("input_pose_bonus", 10.0))
         self.input_prior_decay_rmsd = float(dock.get("input_prior_decay_rmsd", 2.0))
         self.fft_rescore_weight = float(dock.get("fft_rescore_weight", 5.0))
+        self.reranker_model = dock.get("reranker_model")
+        self.reranker_weight = float(dock.get("reranker_weight", 1.0))
 
         self.preprocessor = StructurePreprocessor(config_path)
         self.scorer = DockingScorer(str(config_path) if config_path else None)
         self.fft_search = FFTDockingSearch(self.config)
+        self.pose_reranker = load_pose_reranker(self.reranker_model, self.reranker_weight)
         self.rng = np.random.default_rng(int(dock.get("random_seed", 42)))
 
     def dock(
@@ -135,7 +139,10 @@ class ProteinDocker:
 
         unique = self._deduplicate_poses(candidates)
         clustered = self._cluster_poses(unique)
-        ranked = self.scorer.rank_poses(clustered)[: self.top_n]
+        if self.pose_reranker is not None:
+            ranked = self.pose_reranker.rank_poses(clustered)[: self.top_n]
+        else:
+            ranked = self.scorer.rank_poses(clustered)[: self.top_n]
         for pose in ranked:
             docked_ligand = self._copy_structure_with_coords(ligand, pose.ligand_coords)
             pose.complex_structure = merge_structures(receptor, docked_ligand)

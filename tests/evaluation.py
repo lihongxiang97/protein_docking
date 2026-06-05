@@ -63,19 +63,42 @@ class EvaluationReport:
     def compute_docking_metrics(self, results: List[BenchmarkResult]) -> Dict[str, float]:
         """计算对接结构指标。"""
         rmsd_vals = [r.rmsd for r in results if r.rmsd is not None and r.label == 1]
+        irmsd_vals = [r.irmsd for r in results if r.irmsd is not None and r.label == 1]
         fnat_vals = [r.fnat for r in results if r.fnat is not None and r.label == 1]
         dockq_vals = [r.dockq for r in results if r.dockq is not None and r.label == 1]
 
         metrics = {}
         if rmsd_vals:
+            metrics["mean_lrmsd"] = float(np.mean(rmsd_vals))
+            metrics["median_lrmsd"] = float(np.median(rmsd_vals))
             metrics["mean_rmsd"] = float(np.mean(rmsd_vals))
             metrics["median_rmsd"] = float(np.median(rmsd_vals))
             metrics["success_rate_10A"] = float(np.mean([r < 10 for r in rmsd_vals]))
+        if irmsd_vals:
+            metrics["mean_irmsd"] = float(np.mean(irmsd_vals))
+            metrics["success_rate_irmsd_4A"] = float(np.mean([r <= 4 for r in irmsd_vals]))
         if fnat_vals:
             metrics["mean_fnat"] = float(np.mean(fnat_vals))
         if dockq_vals:
             metrics["mean_dockq"] = float(np.mean(dockq_vals))
+            metrics["acceptable_dockq_rate"] = float(np.mean([q >= 0.23 for q in dockq_vals]))
         return metrics
+
+    def compute_threshold_diagnostic(
+        self, y_true: np.ndarray, y_prob: np.ndarray
+    ) -> Dict[str, float]:
+        """Find the benchmark threshold with the best MCC as a diagnostic only."""
+        thresholds = np.unique(np.concatenate([y_prob, y_prob - 1e-9, y_prob + 1e-9, [0.5]]))
+        best: Dict[str, float] = {}
+        best_key = (-np.inf, -np.inf, -np.inf)
+        for threshold in thresholds:
+            y_pred = (y_prob >= threshold).astype(int)
+            metrics = self.compute_classification_metrics(y_true, y_pred, y_prob)
+            key = (metrics["mcc"], metrics["accuracy"], metrics["f1_score"])
+            if key > best_key:
+                best_key = key
+                best = {"threshold": float(threshold), **metrics}
+        return best
 
     def generate_full_report(self, results: List[BenchmarkResult]) -> Path:
         """生成完整评估报告。"""
@@ -88,6 +111,7 @@ class EvaluationReport:
         y_prob = np.array([r.probability for r in results])
 
         cls_metrics = self.compute_classification_metrics(y_true, y_pred, y_prob)
+        threshold_diagnostic = self.compute_threshold_diagnostic(y_true, y_prob)
         dock_metrics = self.compute_docking_metrics(results)
 
         # 生成图表
@@ -113,7 +137,13 @@ class EvaluationReport:
 
         # Markdown 报告
         report_path = self.output_dir / "evaluation_report.md"
-        self._write_markdown_report(report_path, results, cls_metrics, dock_metrics)
+        self._write_markdown_report(
+            report_path,
+            results,
+            cls_metrics,
+            dock_metrics,
+            threshold_diagnostic,
+        )
         return report_path
 
     def _write_markdown_report(
@@ -122,6 +152,7 @@ class EvaluationReport:
         results: List[BenchmarkResult],
         cls_metrics: Dict[str, float],
         dock_metrics: Dict[str, float],
+        threshold_diagnostic: Optional[Dict[str, float]] = None,
     ) -> None:
         with open(path, "w", encoding="utf-8") as f:
             f.write("# PPI Docking Benchmark Evaluation Report\n\n")
@@ -147,6 +178,23 @@ class EvaluationReport:
             for name, val in cls_metrics.items():
                 f.write(f"| {name.upper()} | {val:.4f} |\n")
             f.write("\n")
+            unique_predictions = {r.predicted_label for r in results}
+            if len(unique_predictions) == 1 and len(results) > 1:
+                f.write(
+                    "**Warning**: all benchmark cases received the same class prediction. "
+                    "This usually means the operating threshold or rule-based PPI "
+                    "calibration is saturated.\n\n"
+                )
+            if threshold_diagnostic:
+                f.write("### Threshold Diagnostic\n\n")
+                f.write(
+                    "The table below is computed on this benchmark split and is intended "
+                    "for calibration diagnosis, not as an independent test result.\n\n"
+                )
+                f.write("| Metric | Value |\n|--------|-------|\n")
+                for name, val in threshold_diagnostic.items():
+                    f.write(f"| {name.upper()} | {val:.4f} |\n")
+                f.write("\n")
 
             f.write("## 4. Docking Structure Metrics\n\n")
             if dock_metrics:
@@ -159,10 +207,10 @@ class EvaluationReport:
 
             f.write("## 5. Algorithm Complexity\n\n")
             f.write("- **SASA computation**: O(N log N) using KD-tree\n")
-            f.write("- **Coarse docking**: O(R × T × N) where R=rotations, T=translations, N=atoms\n")
-            f.write("- **Monte Carlo refinement**: O(M × N), M=iterations\n")
+            f.write("- **Coarse docking**: O(R x T x N) where R=rotations, T=translations, N=atoms\n")
+            f.write("- **Monte Carlo refinement**: O(M x N), M=iterations\n")
             f.write("- **Scoring**: O(N log N) per pose\n")
-            f.write("- **Space**: O(N × P) for P poses\n\n")
+            f.write("- **Space**: O(N x P) for P poses\n\n")
 
             f.write("## 6. Figures\n\n")
             f.write("- `plots/roc_curve.png` - ROC curve\n")
@@ -175,7 +223,7 @@ class EvaluationReport:
             f.write("- Rigid-body docking without induced-fit\n")
             f.write("- Simplified SASA and hydrogen bond detection\n")
             f.write("- Benchmark may use synthetic structures when PDB download fails\n")
-            f.write("- RMSD/FNAT computed with simplified alignment\n\n")
+            f.write("- CAPRI/DockQ metrics depend on correct native chain mapping\n\n")
 
             f.write("## 8. Future Optimization\n\n")
             f.write("- Flexible docking with side-chain sampling\n")
@@ -185,13 +233,18 @@ class EvaluationReport:
             f.write("- Integration with AlphaFold2 predicted structures\n\n")
 
             f.write("## 9. Detailed Results\n\n")
-            f.write("| PDB ID | Label | Predicted | Prob | Score | RMSD |\n")
-            f.write("|--------|-------|-----------|------|-------|------|\n")
+            f.write("| PDB ID | Label | Predicted | Prob | Score | LRMSD | iRMSD | FNAT | DockQ | CAPRI |\n")
+            f.write("|--------|-------|-----------|------|-------|-------|-------|------|-------|-------|\n")
             for r in results:
-                rmsd_str = f"{r.rmsd:.2f}" if r.rmsd else "N/A"
+                rmsd_str = f"{r.rmsd:.2f}" if r.rmsd is not None else "N/A"
+                irmsd_str = f"{r.irmsd:.2f}" if r.irmsd is not None else "N/A"
+                fnat_str = f"{r.fnat:.3f}" if r.fnat is not None else "N/A"
+                dockq_str = f"{r.dockq:.3f}" if r.dockq is not None else "N/A"
+                capri = r.capri_class or "N/A"
                 f.write(
                     f"| {r.pdb_id} | {r.label} | {r.predicted_label} | "
-                    f"{r.probability:.3f} | {r.docking_score:.1f} | {rmsd_str} |\n"
+                    f"{r.probability:.3f} | {r.docking_score:.1f} | {rmsd_str} | "
+                    f"{irmsd_str} | {fnat_str} | {dockq_str} | {capri} |\n"
                 )
 
         logger.info("评估报告已生成: %s", path)

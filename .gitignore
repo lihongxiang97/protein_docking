@@ -16,6 +16,8 @@ results/*
 # Downloaded/generated data caches
 data/benchmark/
 data/example_pdb/raw/
+data/reliable_ppi/
+models/
 
 # Local editor and downloaded frontend artifacts
 .trae/

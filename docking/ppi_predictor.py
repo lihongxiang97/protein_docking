@@ -162,16 +162,16 @@ class PPIPredictor:
         综合界面面积、接触数、对接分、碰撞惩罚。
         """
         evidence = self._compute_rule_evidence(features)
-        logit = -1.15
-        logit += 1.55 * evidence["interface_area"]
-        logit += 1.35 * evidence["contact_residues"]
-        logit += 0.85 * evidence["docking_score"]
-        logit += 0.55 * evidence["hydrogen_bonds"]
-        logit += 0.35 * evidence["hydrophobicity"]
-        logit += 0.45 * evidence["electrostatics"]
-        logit += 0.35 * evidence["contact_density"]
-        logit -= 1.20 * evidence["clash_risk"]
+        logit = -2.0
+        logit += 1.10 * evidence["interface_area"]
+        logit += 0.90 * evidence["contact_residues"]
+        logit += 0.25 * evidence["docking_score"]
+        logit += 0.15 * evidence["hydrogen_bonds"]
+        logit += 0.20 * evidence["hydrophobicity"]
+        logit += 0.30 * evidence["electrostatics"]
+        logit -= 1.00 * evidence["clash_risk"]
         logit -= 0.45 * evidence["long_distance_risk"]
+        logit -= 3.00 * evidence["overpacked_interface"]
 
         prob = float(np.clip(1.0 / (1.0 + np.exp(-logit)), 0.02, 0.98))
         interacts = prob >= self.interaction_threshold
@@ -203,6 +203,7 @@ class PPIPredictor:
             "contact_density": self._bounded(features["contact_density"], 0.015, 0.12),
             "clash_risk": self._bounded(features["clash_penalty"], 5.0, 35.0),
             "long_distance_risk": self._bounded(features["mean_contact_distance"], 4.5, 8.0),
+            "overpacked_interface": self._bounded(features["contact_density"], 0.19, 0.42),
         }
 
     def _generate_explanation(

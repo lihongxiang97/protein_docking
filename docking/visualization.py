@@ -56,7 +56,7 @@ ACADEMIC_COLORS = {
 
 # 学术风格参数配置
 ACADEMIC_STYLE = {
-    'font_family': ['Helvetica', 'Arial', 'sans-serif'],
+    'font_family': 'DejaVu Sans',
     'font_size': 10,
     'title_font_size': 12,
     'label_font_size': 10,
@@ -81,6 +81,7 @@ class ResultVisualizer:
         """配置学术风格的 matplotlib 参数。"""
         plt.rcParams.update({
             'font.family': ACADEMIC_STYLE['font_family'],
+            'font.sans-serif': [ACADEMIC_STYLE['font_family']],
             'font.size': ACADEMIC_STYLE['font_size'],
             'axes.titlesize': ACADEMIC_STYLE['title_font_size'],
             'axes.labelsize': ACADEMIC_STYLE['label_font_size'],

@@ -31,6 +31,8 @@ docking:
   input_pose_bonus: 15.0
   input_prior_decay_rmsd: 2.0
   fft_rescore_weight: 5.0
+  reranker_model: null
+  reranker_weight: 1.0
   random_seed: 42
   grid_search: true
   monte_carlo: true

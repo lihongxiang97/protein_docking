@@ -1,5 +1,50 @@
 # Changelog
 
+## 2026-06-05 - Benchmark Calibration And Report Cleanup
+
+### Fixed
+
+- Fixed saturated rule-based PPI benchmark predictions by adding an overpacked-interface penalty and reducing overly aggressive positive evidence weights.
+- Fixed benchmark report portability by replacing non-ASCII multiplication symbols in complexity text with ASCII-safe `x`.
+- Fixed benchmark report rendering in the Streamlit app by reading generated Markdown and PDB text with explicit UTF-8 decoding and replacement for malformed bytes.
+- Fixed noisy benchmark plot generation on Windows by using matplotlib's bundled `DejaVu Sans` font instead of unavailable Helvetica fallbacks.
+
+### Added
+
+- Added a threshold diagnostic section to benchmark reports to distinguish fixed-threshold performance from split-local calibration behavior.
+- Added regression tests for overpacked-interface probability penalties and ASCII-safe benchmark report output.
+
+### Validation
+
+- Recomputed the existing 23-case benchmark report after recalibration: accuracy `0.8696`, precision `0.9286`, recall `0.8667`, F1 `0.8966`, MCC `0.7238`, AUROC `0.9583`, AUPRC `0.9759`.
+- Verified the regenerated report contains no non-ASCII characters or illegal control characters.
+- Full regression suite passes: `18` tests.
+
+## 2026-06-05 - Reliable Benchmark Data And ML Reranking
+
+### Added
+
+- Added `BENCHMARK_DATASETS.md` with reliable experimental protein-complex and PPI data sources for validation and training.
+- Added `scripts/collect_reliable_ppi_benchmarks.py` to parse DB5.5, write manifests, download bound PDB files, and split receptor/ligand chains.
+- Added optional `docking.ml_reranker.PoseReranker` and `scripts/train_pose_reranker.py` for DockQ/LRMSD-supervised pose reranking.
+
+### Changed
+
+- Added optional `docking.reranker_model` and `docking.reranker_weight` config keys. The existing score-based ranking remains the default.
+
+## 2026-06-05 - CAPRI/DockQ Evaluation Metrics
+
+### Added
+
+- Added CAPRI/DockQ-style docking evaluation with heavy-atom FNAT, receptor-aligned LRMSD, interface iRMSD, DockQ, and CAPRI quality class.
+- Added benchmark output fields for `lrmsd`, `irmsd`, `dockq`, and `capri_class` while keeping `rmsd` as the LRMSD compatibility column.
+- Added regression tests for heavy-atom native contacts and shifted-ligand metric penalties.
+
+### Changed
+
+- Replaced the previous CA-contact simplification in `docking/metrics.py` with heavy-atom residue contact detection.
+- Updated benchmark evaluation reports to show LRMSD, iRMSD, FNAT, DockQ, and CAPRI class.
+
 ## 2026-06-04 - Web Viewer Layout And Localization
 
 ### Added

@@ -7,8 +7,10 @@ import numpy as np
 from docking.config import load_config
 from docking.docking import ProteinDocker
 from docking.fft_search import FFTDockingSearch
-from docking.metrics import evaluate_complex
-from docking.scoring import DockingScorer
+from docking.interface import InterfaceResult
+from docking.metrics import evaluate_complex, residue_contacts
+from docking.ppi_predictor import PPIPredictor
+from docking.scoring import DockingScorer, ScoreComponents
 from docking.spatial import cKDTree
 from docking.structure import Atom, ProteinStructure, Residue, merge_structures
 from docking.structure import ensure_unique_chain_ids
@@ -39,6 +41,42 @@ def make_structure(name, chain, offset=0.0):
             icode=" ",
             atoms=[atom],
         )
+        structure.chains.add(chain)
+    return structure
+
+
+def make_backbone_structure(name, chain, offset=(0.0, 0.0, 0.0)):
+    structure = ProteinStructure(name=name)
+    origin = np.asarray(offset, dtype=float)
+    serial = 1
+    for index in range(3):
+        base = origin + np.array([index * 3.8, 0.0, 0.0])
+        residue = Residue(chain_id=chain, resseq=index + 1, resname="ALA", icode=" ")
+        for atom_name, delta, element in [
+            ("N", (-1.2, 0.0, 0.0), "N"),
+            ("CA", (0.0, 0.0, 0.0), "C"),
+            ("C", (1.3, 0.0, 0.0), "C"),
+            ("O", (1.8, 0.5, 0.0), "O"),
+            ("CB", (0.0, 1.5, 0.0), "C"),
+        ]:
+            coord = base + np.asarray(delta, dtype=float)
+            atom = Atom(
+                serial=serial,
+                name=atom_name,
+                alt_loc=" ",
+                resname="ALA",
+                chain_id=chain,
+                resseq=index + 1,
+                icode=" ",
+                x=float(coord[0]),
+                y=float(coord[1]),
+                z=float(coord[2]),
+                element=element,
+            )
+            residue.atoms.append(atom)
+            structure.atoms.append(atom)
+            serial += 1
+        structure.residues[residue.key] = residue
         structure.chains.add(chain)
     return structure
 
@@ -163,8 +201,71 @@ ppi_prediction:
         complex_structure = merge_structures(receptor, ligand)
         quality = evaluate_complex(complex_structure, complex_structure, {"A"}, {"B"})
         self.assertAlmostEqual(quality.lrmsd, 0.0)
+        self.assertAlmostEqual(quality.irmsd, 0.0)
         self.assertAlmostEqual(quality.fnat, 1.0)
         self.assertAlmostEqual(quality.dockq, 1.0)
+        self.assertEqual(quality.capri_class, "high")
+
+    def test_native_contacts_use_heavy_atoms_not_only_ca_atoms(self):
+        receptor = ProteinStructure(name="receptor")
+        rec_residue = Residue(chain_id="A", resseq=1, resname="ALA", icode=" ")
+        for serial, atom_name, x in [(1, "CA", 0.0), (2, "CB", 0.0)]:
+            atom = Atom(serial, atom_name, " ", "ALA", "A", 1, " ", x, 0.0, 0.0, element="C")
+            rec_residue.atoms.append(atom)
+            receptor.atoms.append(atom)
+        receptor.residues[rec_residue.key] = rec_residue
+        receptor.chains.add("A")
+
+        ligand = ProteinStructure(name="ligand")
+        lig_residue = Residue(chain_id="B", resseq=1, resname="ALA", icode=" ")
+        for serial, atom_name, x in [(3, "CA", 12.0), (4, "CB", 4.5)]:
+            atom = Atom(serial, atom_name, " ", "ALA", "B", 1, " ", x, 0.0, 0.0, element="C")
+            lig_residue.atoms.append(atom)
+            ligand.atoms.append(atom)
+        ligand.residues[lig_residue.key] = lig_residue
+        ligand.chains.add("B")
+
+        contacts = residue_contacts(merge_structures(receptor, ligand), {"A"}, {"B"}, 5.0)
+        self.assertEqual(len(contacts), 1)
+
+    def test_capri_metrics_penalize_shifted_ligand_pose(self):
+        receptor = make_backbone_structure("receptor", "A", offset=(0.0, 0.0, 0.0))
+        native_ligand = make_backbone_structure("ligand", "B", offset=(0.0, 4.0, 0.0))
+        shifted_ligand = make_backbone_structure("ligand", "B", offset=(0.0, 16.0, 0.0))
+        native_complex = merge_structures(receptor, native_ligand)
+        shifted_complex = merge_structures(receptor, shifted_ligand)
+
+        quality = evaluate_complex(native_complex, shifted_complex, {"A"}, {"B"})
+
+        self.assertGreater(quality.lrmsd, 8.0)
+        self.assertEqual(quality.shared_contacts, 0)
+        self.assertAlmostEqual(quality.fnat, 0.0)
+        self.assertLess(quality.dockq, 0.35)
+        self.assertEqual(quality.capri_class, "incorrect")
+
+    def test_ppi_rule_model_penalizes_overpacked_interfaces(self):
+        predictor = PPIPredictor()
+        features = {
+            "interface_area": 2500.0,
+            "contact_residues": 45.0,
+            "hydrophobic_ratio": 0.3,
+            "electrostatic_score": 0.0,
+            "docking_score": 55.0,
+            "hbond_count": 12.0,
+            "clash_penalty": 8.0,
+            "n_interface_residues": 45.0,
+            "mean_contact_distance": 6.0,
+            "contact_density": 0.12,
+        }
+        low_density_prob, _, _ = predictor._rule_based_predict(
+            ScoreComponents(), InterfaceResult(), features
+        )
+        features["contact_density"] = 0.55
+        high_density_prob, _, _ = predictor._rule_based_predict(
+            ScoreComponents(), InterfaceResult(), features
+        )
+
+        self.assertLess(high_density_prob, low_density_prob)
 
 
 if __name__ == "__main__":

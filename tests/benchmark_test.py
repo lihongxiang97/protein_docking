@@ -40,8 +40,10 @@ class BenchmarkResult:
     interface_area: float
     contact_residues: int
     rmsd: Optional[float] = None
+    irmsd: Optional[float] = None
     fnat: Optional[float] = None
     dockq: Optional[float] = None
+    capri_class: Optional[str] = None
     runtime_seconds: float = 0.0
     interface_precision: Optional[float] = None
     interface_recall: Optional[float] = None
@@ -98,14 +100,20 @@ class BenchmarkRunner:
                 interface = interface_analyzer.analyze(receptor, lig_struct)
                 ppi = predictor.predict(best.scores, interface, receptor, lig_struct)
 
-                rmsd, fnat, dockq = None, None, None
+                rmsd, irmsd, fnat, dockq, capri_class = None, None, None, None, None
                 if pair.label == 1 and pair.native_complex_path:
-                    rmsd, fnat, dockq = self._compute_standard_metrics(
+                    quality = self._compute_standard_metrics(
                         best,
                         pair.native_complex_path,
                         pair.receptor_chain,
                         pair.ligand_chain,
                     )
+                    if quality:
+                        rmsd = quality.lrmsd
+                        irmsd = quality.irmsd
+                        fnat = quality.fnat
+                        dockq = quality.dockq
+                        capri_class = quality.capri_class
 
                 result = BenchmarkResult(
                     pdb_id=pair.pdb_id,
@@ -116,8 +124,10 @@ class BenchmarkRunner:
                     interface_area=best.scores.raw_interface_area,
                     contact_residues=best.scores.contact_residues,
                     rmsd=rmsd,
+                    irmsd=irmsd,
                     fnat=fnat,
                     dockq=dockq,
+                    capri_class=capri_class,
                     runtime_seconds=time.time() - t0,
                 )
                 results.append(result)
@@ -175,24 +185,23 @@ class BenchmarkRunner:
         native_pdb: Path,
         receptor_chain: str,
         ligand_chain: str,
-    ) -> tuple:
-        """Compute receptor-aligned LRMSD, native-contact fraction, and DockQ."""
+    ):
+        """Compute CAPRI/DockQ metrics from the native complex and best pose."""
         try:
             from docking.metrics import evaluate_complex
             from docking.structure import PDBParser
 
             if pose.complex_structure is None:
-                return None, None, None
-            quality = evaluate_complex(
+                return None
+            return evaluate_complex(
                 PDBParser.parse(native_pdb),
                 pose.complex_structure,
                 {receptor_chain},
                 {ligand_chain},
             )
-            return quality.lrmsd, quality.fnat, quality.dockq
         except Exception as exc:
             logger.warning("Docking metric calculation failed for %s: %s", native_pdb, exc)
-            return None, None, None
+            return None
 
     def _save_results(self, results: List[BenchmarkResult]) -> None:
         import pandas as pd
@@ -206,8 +215,11 @@ class BenchmarkRunner:
                 "interface_area": r.interface_area,
                 "contact_residues": r.contact_residues,
                 "rmsd": r.rmsd,
+                "lrmsd": r.rmsd,
+                "irmsd": r.irmsd,
                 "fnat": r.fnat,
                 "dockq": r.dockq,
+                "capri_class": r.capri_class,
                 "runtime_s": r.runtime_seconds,
             }
             for r in results

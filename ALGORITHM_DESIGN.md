@@ -114,6 +114,43 @@ python main.py -r receptor.pdb -l ligand.pdb -o results/restrained `
 因此当前主要瓶颈已经从候选采样转移到重排评分。下一阶段应使用标准 benchmark
 训练或标定统计势，而不是仅针对单个复合物继续手工调权重。
 
+## 已补充的标准评估
+
+`docking/metrics.py` 已实现 CAPRI/DockQ 风格结构评估：
+
+- FNAT：使用受体-配体跨链重原子 5 Å 内的原生残基接触保留比例。
+- LRMSD：受体骨架对齐后的配体骨架 RMSD。
+- iRMSD：原生界面残基骨架原子最优叠合 RMSD，界面由重原子 10 Å 接触定义。
+- DockQ：使用 FNAT、iRMSD 和 LRMSD 的标准缩放公式。
+- CAPRI class：输出 high / medium / acceptable / incorrect / not_available 分级。
+
+Benchmark 输出继续保留原 `rmsd` 字段作为 LRMSD 兼容列，并新增 `irmsd`、
+`dockq` 与 `capri_class`。
+
+## 可靠数据与机器学习重排
+
+`BENCHMARK_DATASETS.md` 给出了推荐数据源分层：
+
+- DB5.5：优先用于最终 docking 验证。
+- DOCKGROUND decoys：适合训练和评估 pose-ranking 模型。
+- DIPS-Plus：适合深度学习界面/contact 预测预训练。
+- SKEMPI 2.0：适合结合能和突变敏感评分标定。
+- IntAct/BioGRID：适合 PPI 分类候选，但需要结构映射后才能用于 docking。
+
+新增 `scripts/collect_reliable_ppi_benchmarks.py` 用于解析 DB5.5 官方表格、写出
+manifest，并可按 RCSB PDB 下载和拆分受体/配体链。
+
+新增可选 ML 重排器：
+
+```yaml
+docking:
+  reranker_model: models/pose_reranker.joblib
+  reranker_weight: 1.0
+```
+
+默认不启用该模型。训练数据应来自独立 benchmark/decoy 运行，并使用 DockQ 或
+CAPRI class 作为监督标签，避免把最终测试集泄漏到训练中。
+
 ## 尚未完成
 
 - 基于模板库的序列搜索和复合物模板建模。
@@ -121,7 +158,6 @@ python main.py -r receptor.pdb -l ligand.pdb -o results/restrained `
 - 显式溶剂或力场能量最小化。
 - 训练得到的统计势或原子对势。
 - GPU FFT、旋转并行和大规模筛选。
-- CAPRI 标准 iRMSD、LRMSD、FNAT 与 DockQ 评估。
 
 在这些能力完成前，结果应被视为候选构象生成和排序，而不是实验级结合结构证明。
 
@@ -135,3 +171,7 @@ python main.py -r receptor.pdb -l ligand.pdb -o results/restrained `
   https://www.bonvinlab.org/haddock3-user-manual/intro_restraints.html
 - MEGADOCK 4.0 FFT docking:
   https://pmc.ncbi.nlm.nih.gov/articles/PMC4221127/
+- DockQ protein-protein docking quality measure:
+  https://pmc.ncbi.nlm.nih.gov/articles/PMC4999177/
+- CAPRI-Q / DockQ metric definitions:
+  https://pmc.ncbi.nlm.nih.gov/articles/PMC11458157/
