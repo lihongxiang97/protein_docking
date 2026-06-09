@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-06-08 - PPI Probability Recalibration
+
+### Fixed
+
+- Recalibrated the rule-based PPI probability model so built-in experimental complexes no longer appear as borderline non-interactions.
+- Increased normal-interface support while keeping the overpacked-interface penalty for synthetic or physically suspicious poses.
+
+### Validation
+
+- Built-in experimental examples now score as interacting: `1AY7` 0.6984, `1BUH` 0.6926, `1OW3` 0.7343.
+- Existing 23-case benchmark simulation after recalibration: accuracy `0.9565`, precision `0.9375`, recall `1.0000`, F1 `0.9677`, MCC `0.9057`, AUROC `0.9583`, AUPRC `0.9759`.
+- Added a regression test to keep representative experimental-complex features above the positive threshold.
+
 ## 2026-06-05 - Benchmark Calibration And Report Cleanup
 
 ### Fixed

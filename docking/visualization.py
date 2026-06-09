@@ -720,8 +720,9 @@ class ResultVisualizer:
         rec_types = [r.contact_type for r in interface.receptor_interface]
         lig_types = [r.contact_type for r in interface.ligand_interface]
         
-        rec_counts = Counter(rec_types)
-        lig_counts = Counter(lig_types)
+        counts = Counter(rec_types + lig_types)
+        if not counts:
+            return json.dumps({})
         
         option = {
             "title": {
@@ -734,39 +735,23 @@ class ResultVisualizer:
                 "formatter": "{b}: {c} ({d}%)"
             },
             "legend": {
-                "bottom": 10,
+                "bottom": 0,
                 "textStyle": {"color": ACADEMIC_COLORS['secondary']}
             },
-            "series": [
-                {
-                    "name": "Receptor Interface",
-                    "type": "pie",
-                    "radius": ["40%", "70%"],
-                    "center": ["25%", "50%"],
-                    "avoidLabelOverlap": False,
-                    "itemStyle": {
-                        "borderRadius": 4,
-                        "borderColor": "#fff",
-                        "borderWidth": 2
-                    },
-                    "label": {"show": True, "color": ACADEMIC_COLORS['secondary']},
-                    "data": [{"value": v, "name": k} for k, v in rec_counts.items()]
+            "series": [{
+                "name": "Interface Residues",
+                "type": "pie",
+                "radius": ["42%", "68%"],
+                "center": ["50%", "50%"],
+                "avoidLabelOverlap": True,
+                "itemStyle": {
+                    "borderRadius": 4,
+                    "borderColor": "#fff",
+                    "borderWidth": 2
                 },
-                {
-                    "name": "Ligand Interface",
-                    "type": "pie",
-                    "radius": ["40%", "70%"],
-                    "center": ["75%", "50%"],
-                    "avoidLabelOverlap": False,
-                    "itemStyle": {
-                        "borderRadius": 4,
-                        "borderColor": "#fff",
-                        "borderWidth": 2
-                    },
-                    "label": {"show": True, "color": ACADEMIC_COLORS['secondary']},
-                    "data": [{"value": v, "name": k} for k, v in lig_counts.items()]
-                }
-            ],
+                "label": {"show": True, "color": ACADEMIC_COLORS['secondary']},
+                "data": [{"value": v, "name": k} for k, v in counts.items()]
+            }],
             "color": ACADEMIC_COLORS['category']
         }
         return json.dumps(option)

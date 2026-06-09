@@ -267,6 +267,28 @@ ppi_prediction:
 
         self.assertLess(high_density_prob, low_density_prob)
 
+    def test_ppi_rule_model_keeps_experimental_complex_features_positive(self):
+        predictor = PPIPredictor()
+        features = {
+            "interface_area": 1215.0,
+            "contact_residues": 18.0,
+            "hydrophobic_ratio": 0.1667,
+            "electrostatic_score": 0.0,
+            "docking_score": 51.0,
+            "hbond_count": 12.0,
+            "clash_penalty": 0.0,
+            "n_interface_residues": 18.0,
+            "mean_contact_distance": 6.67,
+            "contact_density": 0.097,
+        }
+
+        probability, interacts, _ = predictor._rule_based_predict(
+            ScoreComponents(), InterfaceResult(), features
+        )
+
+        self.assertTrue(interacts)
+        self.assertGreater(probability, 0.65)
+
 
 if __name__ == "__main__":
     unittest.main()

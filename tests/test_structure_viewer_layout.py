@@ -1,6 +1,10 @@
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
-from docking.interface import InterfaceResult
+from docking.interface import InterfaceResidue, InterfaceResult
+from docking.visualization import ResultVisualizer
 from web.structure_viewer import build_structure_viewer_html, build_viewer_payload
 
 
@@ -57,6 +61,27 @@ class StructureViewerLayoutTests(unittest.TestCase):
         html = build_structure_viewer_html(payload)
         self.assertIn('"shortest_contacts": "Shortest Contacts"', html)
         self.assertIn('id="contact-receptor-heading"', html)
+
+    def test_interface_distribution_uses_single_combined_pie(self):
+        interface = InterfaceResult(
+            receptor_interface=[
+                InterfaceResidue("A", 1, "ALA", contact_type="hydrophobic"),
+                InterfaceResidue("A", 2, "ASP", contact_type="electrostatic"),
+            ],
+            ligand_interface=[
+                InterfaceResidue("B", 3, "VAL", contact_type="hydrophobic"),
+            ],
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            option = json.loads(
+                ResultVisualizer(Path(tmpdir)).get_interface_distribution_echarts(interface)
+            )
+
+        self.assertEqual(len(option["series"]), 1)
+        self.assertEqual(option["series"][0]["name"], "Interface Residues")
+        counts = {item["name"]: item["value"] for item in option["series"][0]["data"]}
+        self.assertEqual(counts["hydrophobic"], 2)
+        self.assertEqual(counts["electrostatic"], 1)
 
 
 if __name__ == "__main__":

@@ -502,34 +502,35 @@ with tab_dock:
         st.dataframe(iface_df, use_container_width=True)
 
         st.markdown("---")
-        st.subheader(f"📊 {tr('score_ranking')}")
-        echarts_option = viz.get_docking_scores_echarts(poses[:top_n])
-        if echarts_option != "{}":
-            render_echarts(echarts_option, height="500px")
+        chart_col1, chart_col2 = st.columns(2, gap="large")
+        with chart_col1:
+            st.subheader(f"📊 {tr('score_ranking')}")
+            echarts_option = viz.get_docking_scores_echarts(poses[:top_n])
+            if echarts_option != "{}":
+                render_echarts(echarts_option, height="420px")
+        with chart_col2:
+            st.subheader(f"📈 {tr('score_components')}")
+            echarts_option = viz.get_score_components_echarts(best)
+            if echarts_option != "{}":
+                render_echarts(echarts_option, height="420px")
 
-        st.markdown("---")
-        st.subheader(f"📈 {tr('score_components')}")
-        echarts_option = viz.get_score_components_echarts(best)
-        if echarts_option != "{}":
-            render_echarts(echarts_option, height="500px")
-
-        st.markdown("---")
-        st.subheader(f"🔬 {tr('interface_distribution')}")
-        echarts_option = viz.get_interface_distribution_echarts(interface)
-        if echarts_option != "{}":
-            render_echarts(echarts_option, height="550px")
-
-        st.markdown("---")
-        st.subheader(f"📉 {tr('distance_distribution')}")
-        echarts_option = viz.get_distance_distribution_echarts(interface)
-        if echarts_option != "{}":
-            render_echarts(echarts_option, height="500px")
+        chart_col3, chart_col4 = st.columns(2, gap="large")
+        with chart_col3:
+            st.subheader(f"🔬 {tr('interface_distribution')}")
+            echarts_option = viz.get_interface_distribution_echarts(interface)
+            if echarts_option != "{}":
+                render_echarts(echarts_option, height="420px")
+        with chart_col4:
+            st.subheader(f"📉 {tr('distance_distribution')}")
+            echarts_option = viz.get_distance_distribution_echarts(interface)
+            if echarts_option != "{}":
+                render_echarts(echarts_option, height="420px")
 
         st.markdown("---")
         st.subheader(f"🔥 {tr('contact_map')}")
         echarts_option = viz.get_contact_map_echarts(interface)
         if echarts_option != "{}":
-            render_echarts(echarts_option, height="600px")
+            render_echarts(echarts_option, height="520px")
 
         # 3D 结构可视化
         st.markdown("---")
@@ -576,7 +577,7 @@ with tab_dock:
                 metrics=viewer_metrics,
                 language=st.session_state.language,
             )
-            viewer_html = render_structure_viewer(viewer_payload, height_px=760)
+            viewer_html = render_structure_viewer(viewer_payload, height_px=700)
 
             # 显示选中构象的评分信息
             col1, col2, col3, col4 = st.columns(4)

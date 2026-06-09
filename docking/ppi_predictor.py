@@ -162,8 +162,8 @@ class PPIPredictor:
         综合界面面积、接触数、对接分、碰撞惩罚。
         """
         evidence = self._compute_rule_evidence(features)
-        logit = -2.0
-        logit += 1.10 * evidence["interface_area"]
+        logit = -1.4
+        logit += 1.30 * evidence["interface_area"]
         logit += 0.90 * evidence["contact_residues"]
         logit += 0.25 * evidence["docking_score"]
         logit += 0.15 * evidence["hydrogen_bonds"]
@@ -171,7 +171,7 @@ class PPIPredictor:
         logit += 0.30 * evidence["electrostatics"]
         logit -= 1.00 * evidence["clash_risk"]
         logit -= 0.45 * evidence["long_distance_risk"]
-        logit -= 3.00 * evidence["overpacked_interface"]
+        logit -= 3.20 * evidence["overpacked_interface"]
 
         prob = float(np.clip(1.0 / (1.0 + np.exp(-logit)), 0.02, 0.98))
         interacts = prob >= self.interaction_threshold
