@@ -817,7 +817,12 @@ class ResultVisualizer:
             },
             "tooltip": {
                 "position": "top",
-                "formatter": "Receptor:{b}<br/>Ligand:{c}<br/>Strength:{d}"
+                "formatter": "__PPI_CONTACT_MAP_TOOLTIP__",
+                "valueLabels": {
+                    "receptor": "Receptor",
+                    "ligand": "Ligand",
+                    "strength": "Strength"
+                }
             },
             "grid": self._echarts_grid(top=82, right=58, bottom=118, left=94),
             "xAxis": {
@@ -853,8 +858,14 @@ class ResultVisualizer:
             "series": [{
                 "name": "Contact Strength",
                 "type": "heatmap",
+                "dimensions": ["ligand", "receptor", "strength"],
+                "encode": {
+                    "x": "ligand",
+                    "y": "receptor",
+                    "tooltip": ["receptor", "ligand", "strength"]
+                },
                 "data": [
-                    [j, i, float(data[i][j])]
+                    [j, i, round(float(data[i][j]), 3)]
                     for i in range(n_rows)
                     for j in range(n_cols)
                 ],

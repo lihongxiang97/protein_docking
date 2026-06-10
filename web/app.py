@@ -5,7 +5,10 @@ PPI Docking Streamlit Web 界面
 
 import json
 import sys
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlencode
 
 import joblib
 import pandas as pd
@@ -24,6 +27,63 @@ from docking.structure import split_complex_by_reference_chains
 from docking.visualization import ResultVisualizer
 from tests.benchmark_data import generate_example_pair, list_example_pairs
 from web.structure_viewer import build_viewer_payload, render_structure_viewer
+
+
+WEB_JOBS_DIR = PROJECT_ROOT / "results" / "web_run" / "jobs"
+
+
+def make_job_id() -> str:
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    return f"{timestamp}_{uuid.uuid4().hex[:10]}"
+
+
+def is_safe_job_id(job_id: str) -> bool:
+    return bool(job_id) and all(char.isalnum() or char in "_-" for char in job_id)
+
+
+def job_dir_for(job_id: str) -> Path:
+    if not is_safe_job_id(job_id):
+        raise ValueError("Invalid job id")
+    return WEB_JOBS_DIR / job_id
+
+
+def save_job_bundle(output_dir: Path, bundle: dict) -> None:
+    joblib.dump(bundle, output_dir / "job_state.joblib")
+
+
+def load_job_bundle(job_id: str) -> dict | None:
+    if not is_safe_job_id(job_id):
+        return None
+    output_dir = job_dir_for(job_id)
+    state_path = output_dir / "job_state.joblib"
+    if not state_path.exists():
+        return None
+    bundle = joblib.load(state_path)
+    bundle["job_id"] = job_id
+    bundle["output_dir"] = output_dir
+    return bundle
+
+
+def restore_job_session(bundle: dict) -> None:
+    output_dir = Path(bundle["output_dir"])
+    poses = bundle.get("poses", [])
+    st.session_state.analysis_done = True
+    st.session_state.job_id = bundle.get("job_id")
+    st.session_state.loaded_job_id = bundle.get("job_id")
+    st.session_state.created_at = bundle.get("created_at", "")
+    st.session_state.poses = poses
+    st.session_state.interface = bundle.get("interface")
+    st.session_state.ppi = bundle.get("ppi")
+    st.session_state.best = bundle.get("best")
+    st.session_state.viz = ResultVisualizer(output_dir / "plots")
+    st.session_state.output_dir = output_dir
+    st.session_state.selected_pose_rank = bundle.get(
+        "selected_pose_rank",
+        poses[0].rank if poses else 1,
+    )
+    st.session_state.receptor_structure = bundle.get("receptor_structure")
+    st.session_state.ligand_structure = bundle.get("ligand_structure")
+    st.session_state.pose_details = bundle.get("pose_details", {})
 
 st.set_page_config(
     page_title="PPI Docking",
@@ -100,6 +160,22 @@ st.markdown(
         box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
       }
 
+      .ppi-job-link {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 36px;
+        margin: 0.25rem 0 0.6rem;
+        padding: 0 0.9rem;
+        border: 1px solid rgba(49, 51, 63, 0.18);
+        border-radius: 8px;
+        background: rgb(255, 255, 255);
+        color: rgb(38, 39, 48);
+        font-weight: 600;
+        text-decoration: none;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+      }
+
       div[data-testid="stMetric"] {
         min-height: 88px;
       }
@@ -171,6 +247,10 @@ TEXT = {
         "docking_spinner": "正在执行分子对接...",
         "docking_failed": "对接失败，未找到有效构象",
         "analysis_complete": "分析完成！",
+        "job_id": "任务 ID: {job_id}",
+        "job_loaded": "已加载任务结果: {job_id}",
+        "job_not_found": "未找到任务结果: {job_id}",
+        "open_job_page": "在新页面打开此任务结果",
         "docking_score": "对接评分",
         "interaction_probability": "互作概率",
         "interface_residues": "界面残基",
@@ -263,6 +343,10 @@ $$Score = w_H \\cdot H + w_E \\cdot E + w_C \\cdot C + w_A \\cdot A - w_P \\cdot
         "docking_spinner": "Running protein-protein docking...",
         "docking_failed": "Docking failed: no valid poses were found",
         "analysis_complete": "Analysis complete.",
+        "job_id": "Job ID: {job_id}",
+        "job_loaded": "Loaded job result: {job_id}",
+        "job_not_found": "Job result not found: {job_id}",
+        "open_job_page": "Open this job result in a new page",
         "docking_score": "Docking Score",
         "interaction_probability": "Interaction Probability",
         "interface_residues": "Interface Residues",
@@ -357,7 +441,9 @@ ECHARTS_ZH = {
     "Ligand Residue Index": "配体残基索引",
     "Receptor Residue Index": "受体残基索引",
     "Contact Strength": "接触强度",
-    "Receptor:{b}<br/>Ligand:{c}<br/>Strength:{d}": "受体:{b}<br/>配体:{c}<br/>强度:{d}",
+    "Receptor": "受体",
+    "Ligand": "配体",
+    "Strength": "强度",
     "hbond": "氢键",
     "hydrophobic": "疏水",
     "electrostatic": "静电",
@@ -440,6 +526,45 @@ def render_echarts(option_json, width="100%", height="500px"):
         <script type="text/javascript">
             var chart = echarts.init(document.getElementById('chart'));
             var option = %s;
+            function escapeTooltipValue(value) {
+                return String(value).replace(/[&<>"']/g, function(character) {
+                    return {
+                        '&': '&amp;',
+                        '<': '&lt;',
+                        '>': '&gt;',
+                        '"': '&quot;',
+                        "'": '&#39;'
+                    }[character];
+                });
+            }
+            function formatTooltipNumber(value) {
+                if (typeof value === 'number' && Number.isFinite(value)) {
+                    var formatted = value.toFixed(3);
+                    return formatted.replace(/\\.?0+$/, '');
+                }
+                return value == null ? '' : value;
+            }
+            if (
+                option.tooltip &&
+                option.tooltip.formatter === "__PPI_CONTACT_MAP_TOOLTIP__"
+            ) {
+                var contactMapLabels = option.tooltip.valueLabels || {};
+                option.tooltip.formatter = function(params) {
+                    var values = Array.isArray(params.value) ? params.value : [];
+                    var ligand = formatTooltipNumber(values[0]);
+                    var receptor = formatTooltipNumber(values[1]);
+                    var strength = formatTooltipNumber(values[2]);
+                    return (
+                        escapeTooltipValue(contactMapLabels.receptor || "Receptor") + ": " +
+                        escapeTooltipValue(receptor) + "<br/>" +
+                        escapeTooltipValue(contactMapLabels.ligand || "Ligand") + ": " +
+                        escapeTooltipValue(ligand) + "<br/>" +
+                        escapeTooltipValue(contactMapLabels.strength || "Strength") + ": " +
+                        escapeTooltipValue(strength)
+                    );
+                };
+                delete option.tooltip.valueLabels;
+            }
             chart.setOption(option, true);
             window.addEventListener('resize', function() {
                 chart.resize();
@@ -488,6 +613,9 @@ def ensure_state_defaults():
         "best": None,
         "viz": None,
         "output_dir": None,
+        "job_id": None,
+        "loaded_job_id": None,
+        "created_at": "",
         "selected_pose_rank": 1,
         "receptor_structure": None,
         "ligand_structure": None,
@@ -506,8 +634,24 @@ if isinstance(query_language, list):
 if query_language in ("zh", "en") and query_language != st.session_state.language:
     st.session_state.language = query_language
 
+query_job_id = st.query_params.get("job_id")
+if isinstance(query_job_id, list):
+    query_job_id = query_job_id[0] if query_job_id else None
+job_load_error = None
+if query_job_id:
+    if query_job_id != st.session_state.loaded_job_id:
+        bundle = load_job_bundle(query_job_id)
+        if bundle:
+            restore_job_session(bundle)
+        else:
+            job_load_error = query_job_id
+
 next_language = "en" if st.session_state.language == "zh" else "zh"
 switch_label = "EN" if st.session_state.language == "zh" else "中文"
+language_params = {"language": next_language}
+if st.session_state.get("job_id"):
+    language_params["job_id"] = st.session_state.job_id
+language_href = "?" + urlencode(language_params)
 st.markdown(
     f"""
     <div class="ppi-topbar">
@@ -516,12 +660,17 @@ st.markdown(
           <h1>{tr("app_title")}</h1>
           <p>{tr("app_subtitle")}</p>
         </div>
-        <a class="ppi-lang-button" href="?language={next_language}" title="{tr("language_help")}">{switch_label}</a>
+        <a class="ppi-lang-button" href="{language_href}" title="{tr("language_help")}">{switch_label}</a>
       </div>
     </div>
     """,
     unsafe_allow_html=True,
 )
+
+if job_load_error:
+    st.warning(tr("job_not_found", job_id=job_load_error))
+elif query_job_id and st.session_state.get("loaded_job_id") == query_job_id:
+    st.info(tr("job_loaded", job_id=query_job_id))
 
 tab_dock, tab_train, tab_bench, tab_about = st.tabs(
     [tr("tab_dock"), tr("tab_train"), tr("tab_bench"), tr("tab_about")]
@@ -571,8 +720,10 @@ with tab_dock:
     run_btn = st.button(tr("start_docking"), type="primary")
 
     if run_btn:
-        output_dir = PROJECT_ROOT / "results" / "web_run"
+        job_id = make_job_id()
+        output_dir = job_dir_for(job_id)
         output_dir.mkdir(parents=True, exist_ok=True)
+        created_at = datetime.now(timezone.utc).isoformat()
 
         if use_example:
             rec_path, lig_path = generate_example_pair(
@@ -620,6 +771,9 @@ with tab_dock:
 
         # 保存到 session_state
         st.session_state.analysis_done = True
+        st.session_state.job_id = job_id
+        st.session_state.loaded_job_id = job_id
+        st.session_state.created_at = created_at
         st.session_state.poses = poses
         st.session_state.interface = interface
         st.session_state.ppi = ppi
@@ -630,6 +784,24 @@ with tab_dock:
         st.session_state.receptor_structure = receptor
         st.session_state.ligand_structure = ligand
         st.session_state.pose_details = pose_details
+        save_job_bundle(
+            output_dir,
+            {
+                "job_id": job_id,
+                "created_at": created_at,
+                "poses": poses,
+                "interface": interface,
+                "ppi": ppi,
+                "best": best,
+                "output_dir": str(output_dir),
+                "selected_pose_rank": poses[0].rank,
+                "receptor_structure": receptor,
+                "ligand_structure": ligand,
+                "pose_details": pose_details,
+            },
+        )
+        st.query_params["language"] = st.session_state.language
+        st.query_params["job_id"] = job_id
 
     # 显示分析结果
     if st.session_state.analysis_done:
@@ -644,6 +816,18 @@ with tab_dock:
         pose_details = st.session_state.pose_details
 
         st.success(tr("analysis_complete"))
+        if st.session_state.get("job_id"):
+            job_params = {
+                "language": st.session_state.language,
+                "job_id": st.session_state.job_id,
+            }
+            job_href = "?" + urlencode(job_params)
+            st.caption(tr("job_id", job_id=st.session_state.job_id))
+            st.markdown(
+                f'<a class="ppi-job-link" href="{job_href}" target="_blank" rel="noopener noreferrer">'
+                f'{tr("open_job_page")}</a>',
+                unsafe_allow_html=True,
+            )
 
         m1, m2, m3, m4 = st.columns(4)
         m1.metric(tr("docking_score"), f"{best.scores.total:.1f}")

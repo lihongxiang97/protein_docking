@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -17,6 +18,7 @@ from docking.spatial import cKDTree
 from docking.structure import Atom, ProteinStructure, Residue, merge_structures
 from docking.structure import ensure_unique_chain_ids
 from docking.surface import SurfaceAnalyzer
+from docking.visualization import ResultVisualizer
 from web.structure_viewer import build_structure_viewer_html
 
 
@@ -279,6 +281,31 @@ ppi_prediction:
         self.assertIn('value="jpg"', markup)
         self.assertIn("stage.makeImage", markup)
         self.assertIn("convertPngToJpeg", markup)
+
+    def test_contact_map_tooltip_uses_explicit_heatmap_dimensions(self):
+        interface = InterfaceResult(contact_map=np.asarray([[0.0, 0.5], [0.25, 1.0]]))
+        with tempfile.TemporaryDirectory() as tmp:
+            option = json.loads(
+                ResultVisualizer(Path(tmp)).get_contact_map_echarts(interface)
+            )
+        self.assertEqual(
+            option["tooltip"]["formatter"],
+            "__PPI_CONTACT_MAP_TOOLTIP__",
+        )
+        self.assertEqual(
+            option["tooltip"]["valueLabels"],
+            {"receptor": "Receptor", "ligand": "Ligand", "strength": "Strength"},
+        )
+        self.assertNotIn("{@", option["tooltip"]["formatter"])
+        self.assertNotIn("{c}", option["tooltip"]["formatter"])
+        self.assertNotIn("{d}", option["tooltip"]["formatter"])
+        series = option["series"][0]
+        self.assertEqual(series["dimensions"], ["ligand", "receptor", "strength"])
+        self.assertEqual(
+            series["encode"],
+            {"x": "ligand", "y": "receptor", "tooltip": ["receptor", "ligand", "strength"]},
+        )
+        self.assertIn([1, 0, 0.5], series["data"])
 
     def test_identical_complex_has_perfect_docking_metrics(self):
         receptor = make_structure("receptor", "A", offset=0.0)
