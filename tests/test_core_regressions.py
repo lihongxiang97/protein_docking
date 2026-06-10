@@ -8,6 +8,8 @@ from docking.config import load_config
 from docking.docking import ProteinDocker
 from docking.fft_search import FFTDockingSearch
 from docking.interface import InterfaceResult
+from docking.ml_reranker import POSE_FEATURES, PoseReranker, pose_feature_dict
+from docking.model_training import train_pose_reranker_frame
 from docking.metrics import evaluate_complex, residue_contacts
 from docking.ppi_predictor import PPIPredictor
 from docking.scoring import DockingScorer, ScoreComponents
@@ -15,6 +17,7 @@ from docking.spatial import cKDTree
 from docking.structure import Atom, ProteinStructure, Residue, merge_structures
 from docking.structure import ensure_unique_chain_ids
 from docking.surface import SurfaceAnalyzer
+from web.structure_viewer import build_structure_viewer_html
 
 
 def make_structure(name, chain, offset=0.0):
@@ -194,6 +197,88 @@ ppi_prediction:
         self.assertGreater(close_score, far_score)
         self.assertEqual(close_violations, 0)
         self.assertGreater(far_violations, 0)
+
+    def test_pose_features_include_interface_geometry_for_reranking(self):
+        receptor = make_structure("receptor", "A", offset=0.0)
+        ligand = make_structure("ligand", "B", offset=4.0)
+        score = DockingScorer().score_complex(receptor, ligand)
+        features = pose_feature_dict(type("Pose", (), {
+            "scores": score,
+            "search_score": 0.0,
+            "cluster_size": 1,
+        })())
+
+        for name in [
+            "mean_contact_distance",
+            "contact_density",
+            "interface_balance",
+            "residue_pair_count",
+        ]:
+            self.assertIn(name, POSE_FEATURES)
+            self.assertIn(name, features)
+        self.assertGreater(score.residue_pair_count, 0)
+        self.assertGreater(score.mean_contact_distance, 0.0)
+        self.assertGreater(score.interface_balance, 0.0)
+
+    def test_pose_reranker_uses_classifier_probability_when_available(self):
+        class DummyClassifier:
+            def predict_proba(self, features):
+                return np.column_stack([np.zeros(len(features)), np.full(len(features), 0.8)])
+
+        pose = type("Pose", (), {
+            "scores": ScoreComponents(),
+            "search_score": 0.0,
+            "cluster_size": 1,
+        })()
+        prediction = PoseReranker(DummyClassifier()).predict([pose])
+        self.assertAlmostEqual(float(prediction[0]), 0.8)
+
+    def test_pose_reranker_training_accepts_feature_dataframe(self):
+        import pandas as pd
+
+        rows = []
+        for index in range(12):
+            row = {name: float(index + offset) for offset, name in enumerate(POSE_FEATURES)}
+            row["dockq"] = 0.35 if index % 2 else 0.05
+            rows.append(row)
+        result = train_pose_reranker_frame(
+            pd.DataFrame(rows),
+            model_type="random_forest",
+            trees=5,
+            min_samples_leaf=1,
+        )
+        self.assertEqual(result.metrics["mode"], "classification")
+        self.assertEqual(result.metrics["model_type"], "random_forest")
+        self.assertEqual(result.metrics["rows"], 12)
+
+    def test_structure_viewer_exposes_high_resolution_image_export(self):
+        payload = {
+            "pdbText": "",
+            "poseTitle": "Rank 1 Docked Complex",
+            "metrics": [],
+            "language": "en",
+            "labels": {},
+            "receptorChains": ["A"],
+            "ligandChains": ["B"],
+            "receptorChainSelection": ":A",
+            "ligandChainSelection": ":B",
+            "interface": {
+                "receptorSelection": "",
+                "ligandSelection": "",
+                "combinedSelection": "",
+                "contactPairsTotal": 0,
+                "interfaceResiduesTotal": 0,
+                "receptorResidues": 0,
+                "ligandResidues": 0,
+            },
+            "contacts": [],
+        }
+        markup = build_structure_viewer_html(payload)
+        self.assertIn('id="btn-export-image"', markup)
+        self.assertIn('value="png"', markup)
+        self.assertIn('value="jpg"', markup)
+        self.assertIn("stage.makeImage", markup)
+        self.assertIn("convertPngToJpeg", markup)
 
     def test_identical_complex_has_perfect_docking_metrics(self):
         receptor = make_structure("receptor", "A", offset=0.0)

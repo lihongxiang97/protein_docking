@@ -76,6 +76,89 @@ python main.py \
     --output results/
 ```
 
+严格盲对接或 DB5.5 测试建议显式禁用输入相对构象先验，并扩大采样：
+
+```bash
+python main.py \
+    --receptor receptor.pdb \
+    --ligand ligand.pdb \
+    --output results/db55_case \
+    --blind \
+    --rotations 96 \
+    --mc-iterations 600
+```
+
+抗体-抗原或已有界面线索的体系，可以用 CDR/界面残基作为模糊约束：
+
+```bash
+python main.py \
+    --receptor antibody.pdb \
+    --ligand antigen.pdb \
+    --receptor-active H:31,H:32,H:33,H:52,H:53,H:100 \
+    --ligand-active A:45,A:46,A:80
+```
+
+### 训练 DB5.5/decoy pose reranker
+
+先下载官方 DB5.5 数据：
+
+```bash
+python scripts/collect_reliable_ppi_benchmarks.py db55 \
+    --out data/reliable_ppi/db55 \
+    --download-archive \
+    --extract-archive \
+    --download-table
+```
+
+每次对接输出的 `docking_scores.csv` 已包含经验分、FFT 分、聚类大小、界面接触密度、平均接触距离、界面平衡度等 pose 特征。可用 DB5.5 或用户自定义 native complex 生成训练行：
+
+```bash
+python scripts/build_pose_training_set.py \
+    --manifest data/reliable_ppi/db55/manifest.json \
+    --out results/pose_training_rows.csv \
+    --blind \
+    --top-n 10 \
+    --include-native-pose
+```
+
+`--include-native-pose` 会为每个 case 额外加入一行 bound-native 正样本锚点，
+避免严格盲对接 Top-N 全是负样本时训练器学不到 acceptable pose 的特征。
+
+也可以提供自己的 CSV manifest：
+
+```csv
+case_id,receptor_path,ligand_path,native_complex_path,receptor_chains,ligand_chains
+case_001,data/user/case_001_rec.pdb,data/user/case_001_lig.pdb,data/user/case_001_native.pdb,A,B
+```
+
+训练模型时，如果只有 `dockq` 列，脚本会按 DockQ ≥ 0.23 自动生成 acceptable 标签。默认模型使用 Random Forest；也可用 `--model-type mlp` 训练多层感知机。
+
+```bash
+python scripts/train_pose_reranker.py \
+    --input results/pose_training_rows.csv \
+    --model-out models/default_pose_reranker.joblib \
+    --model-type random_forest
+```
+
+然后在 `config.yaml` 中设置：
+
+```yaml
+docking:
+  reranker_model: models/default_pose_reranker.joblib
+  reranker_weight: 40.0
+```
+
+命令行也可临时指定自定义模型：
+
+```bash
+python main.py \
+    --receptor receptor.pdb \
+    --ligand ligand.pdb \
+    --reranker-model models/my_pose_reranker.joblib
+```
+
+Web 端的“模型训练”页支持直接上传 pose-feature CSV 训练模型，并保存为默认模型供后续预测使用。
+
 ### Web 界面
 
 ```bash
@@ -142,7 +225,7 @@ results/
 
 ### 5.2 分子对接
 
-**粗搜索**: 斐波那契球面均匀旋转 × 平移网格  
+**粗搜索**: FFT 全局相关搜索，默认提高旋转数与每旋转平移峰数量以改善盲搜覆盖  
 **精修**: Metropolis Monte Carlo 局部优化
 
 刚体变换：
@@ -169,7 +252,7 @@ $$Score = w_H \cdot H + w_E \cdot E + w_C \cdot C + w_A \cdot A - w_P \cdot P + 
 
 **特征** (10 维): 界面面积、接触残基数、疏水比例、静电得分、对接分、氢键数、碰撞惩罚、界面残基数、平均接触距离、接触密度
 
-**模型**: Random Forest（有训练数据时）或基于规则的评分模型（默认）
+**模型**: Random Forest（有训练数据时）或基于规则的评分模型（默认）。DB5.5 结果表明互作概率不是主要瓶颈时，建议优先训练 pose reranker，而不是继续调 PPI 阈值。
 
 ### 5.5 界面残基识别
 

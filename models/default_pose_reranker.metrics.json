@@ -1,0 +1,10 @@
+{
+  "rows": 4561,
+  "mode": "classification",
+  "model_type": "random_forest",
+  "target": "acceptable",
+  "positive_rows": 1077,
+  "accuracy": 0.9671772428884027,
+  "average_precision": 0.9683185891235662,
+  "roc_auc": 0.989679507587817
+}

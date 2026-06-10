@@ -36,6 +36,10 @@ class ScoreComponents:
     restraint_score: float = 0.0
     restraint_violations: int = 0
     prior_score: float = 0.0
+    mean_contact_distance: float = 0.0
+    contact_density: float = 0.0
+    interface_balance: float = 0.0
+    residue_pair_count: int = 0
 
     def to_dict(self) -> Dict:
         return {
@@ -51,6 +55,10 @@ class ScoreComponents:
             "restraint_score": self.restraint_score,
             "restraint_violations": self.restraint_violations,
             "prior_score": self.prior_score,
+            "mean_contact_distance": self.mean_contact_distance,
+            "contact_density": self.contact_density,
+            "interface_balance": self.interface_balance,
+            "residue_pair_count": self.residue_pair_count,
         }
 
 
@@ -131,7 +139,13 @@ class DockingScorer:
         comp.interface_area = min(area / 500.0, 1.0) * 100
 
         # 残基接触
-        comp.contact_residues = self._count_contact_residues(receptor, ligand)
+        (
+            comp.contact_residues,
+            comp.residue_pair_count,
+            comp.mean_contact_distance,
+            comp.contact_density,
+            comp.interface_balance,
+        ) = self._interface_contact_stats(receptor, ligand)
 
         # 疏水 H
         comp.hydrophobic = self._score_hydrophobic(receptor, ligand)
@@ -158,9 +172,9 @@ class DockingScorer:
 
         return comp
 
-    def _count_contact_residues(
+    def _interface_contact_stats(
         self, receptor: ProteinStructure, ligand: ProteinStructure
-    ) -> int:
+    ) -> Tuple[int, int, float, float, float]:
         rec_ca = []
         rec_keys = []
         for res in receptor.get_residue_list():
@@ -178,17 +192,45 @@ class DockingScorer:
                 lig_keys.append(res.key)
 
         if not rec_ca or not lig_ca:
-            return 0
+            return 0, 0, 0.0, 0.0, 0.0
 
-        tree = cKDTree(np.array(lig_ca))
+        lig_array = np.array(lig_ca)
+        tree = cKDTree(lig_array)
         rec_contacts = set()
         lig_contacts = set()
+        residue_pairs = set()
+        distances = []
         for i, ca in enumerate(rec_ca):
             neighbors = tree.query_ball_point(ca, self.residue_contact_cutoff)
             if neighbors:
                 rec_contacts.add(rec_keys[i])
                 lig_contacts.update(lig_keys[j] for j in neighbors)
-        return len(rec_contacts) + len(lig_contacts)
+                for j in neighbors:
+                    residue_pairs.add((rec_keys[i], lig_keys[j]))
+                    distances.append(float(np.linalg.norm(ca - lig_array[j])))
+        contact_residues = len(rec_contacts) + len(lig_contacts)
+        pair_count = len(residue_pairs)
+        mean_distance = float(np.mean(distances)) if distances else 0.0
+        density_denominator = max(1, len(rec_contacts) * len(lig_contacts))
+        contact_density = pair_count / density_denominator
+        if rec_contacts or lig_contacts:
+            interface_balance = min(len(rec_contacts), len(lig_contacts)) / max(
+                len(rec_contacts), len(lig_contacts), 1
+            )
+        else:
+            interface_balance = 0.0
+        return (
+            contact_residues,
+            pair_count,
+            float(mean_distance),
+            float(contact_density),
+            float(interface_balance),
+        )
+
+    def _count_contact_residues(
+        self, receptor: ProteinStructure, ligand: ProteinStructure
+    ) -> int:
+        return self._interface_contact_stats(receptor, ligand)[0]
 
     def _score_hydrophobic(
         self, receptor: ProteinStructure, ligand: ProteinStructure

@@ -102,6 +102,35 @@ class ResultVisualizer:
             'axes.facecolor': 'white',
             'grid.color': ACADEMIC_COLORS['light_gray'],
         })
+
+    @staticmethod
+    def _echarts_grid(top: int = 72, right: int = 40, bottom: int = 72, left: int = 72) -> Dict:
+        """Return roomy ECharts grid margins so axis names are not clipped."""
+        return {
+            "top": top,
+            "right": right,
+            "bottom": bottom,
+            "left": left,
+            "containLabel": True,
+        }
+
+    @staticmethod
+    def _axis_name_style() -> Dict:
+        return {
+            "color": ACADEMIC_COLORS['gray'],
+            "fontSize": 12,
+            "padding": [4, 0, 0, 0],
+        }
+
+    @staticmethod
+    def _axis_label_style(rotate: int = 0) -> Dict:
+        return {
+            "color": ACADEMIC_COLORS['secondary'],
+            "fontSize": 11,
+            "rotate": rotate,
+            "hideOverlap": True,
+            "overflow": "truncate",
+        }
     
     def _save_figure(self, fig, path):
         """保存图片，使用统一的配置。"""
@@ -547,19 +576,23 @@ class ResultVisualizer:
                 "axisPointer": {"type": "shadow"},
                 "formatter": "{b}: {c}"
             },
-            "grid": {"left": "3%", "right": "4%", "bottom": "3%", "containLabel": True},
+            "grid": self._echarts_grid(top=66, right=72, bottom=58, left=68),
             "xAxis": {
                 "type": "value",
                 "name": "Docking Score",
-                "nameTextStyle": {"color": ACADEMIC_COLORS['gray']},
-                "axisLabel": {"color": ACADEMIC_COLORS['secondary']}
+                "nameLocation": "middle",
+                "nameGap": 34,
+                "nameTextStyle": self._axis_name_style(),
+                "axisLabel": self._axis_label_style(),
             },
             "yAxis": {
                 "type": "category",
                 "data": [str(r) for r in reversed(ranks)],
                 "name": "Rank",
-                "nameTextStyle": {"color": ACADEMIC_COLORS['gray']},
-                "axisLabel": {"color": ACADEMIC_COLORS['secondary']}
+                "nameLocation": "middle",
+                "nameGap": 42,
+                "nameTextStyle": self._axis_name_style(),
+                "axisLabel": self._axis_label_style(),
             },
             "series": [{
                 "name": "Score",
@@ -611,18 +644,20 @@ class ResultVisualizer:
                 "axisPointer": {"type": "shadow"},
                 "formatter": "{b}: {c}"
             },
-            "grid": {"left": "3%", "right": "4%", "bottom": "3%", "containLabel": True},
+            "grid": self._echarts_grid(top=66, right=38, bottom=108, left=74),
             "xAxis": {
                 "type": "category",
                 "data": list(components.keys()),
-                "axisLabel": {"rotate": 30, "color": ACADEMIC_COLORS['secondary']},
+                "axisLabel": self._axis_label_style(rotate=28),
                 "axisTick": {"alignWithLabel": True}
             },
             "yAxis": {
                 "type": "value",
                 "name": "Weighted Contribution",
-                "nameTextStyle": {"color": ACADEMIC_COLORS['gray']},
-                "axisLabel": {"color": ACADEMIC_COLORS['secondary']}
+                "nameLocation": "middle",
+                "nameGap": 48,
+                "nameTextStyle": self._axis_name_style(),
+                "axisLabel": self._axis_label_style(),
             },
             "series": [{
                 "type": "bar",
@@ -670,18 +705,22 @@ class ResultVisualizer:
                 "top": 30,
                 "textStyle": {"color": ACADEMIC_COLORS['secondary']}
             },
-            "grid": {"left": "3%", "right": "4%", "bottom": "3%", "containLabel": True},
+            "grid": self._echarts_grid(top=92, right=40, bottom=74, left=72),
             "xAxis": {
                 "type": "value",
                 "name": "Distance (Å)",
-                "nameTextStyle": {"color": ACADEMIC_COLORS['gray']},
-                "axisLabel": {"color": ACADEMIC_COLORS['secondary']}
+                "nameLocation": "middle",
+                "nameGap": 36,
+                "nameTextStyle": self._axis_name_style(),
+                "axisLabel": self._axis_label_style(),
             },
             "yAxis": {
                 "type": "value",
                 "name": "Count",
-                "nameTextStyle": {"color": ACADEMIC_COLORS['gray']},
-                "axisLabel": {"color": ACADEMIC_COLORS['secondary']}
+                "nameLocation": "middle",
+                "nameGap": 46,
+                "nameTextStyle": self._axis_name_style(),
+                "axisLabel": self._axis_label_style(),
             },
             "series": [
                 {
@@ -735,21 +774,27 @@ class ResultVisualizer:
                 "formatter": "{b}: {c} ({d}%)"
             },
             "legend": {
-                "bottom": 0,
+                "bottom": 8,
+                "left": "center",
                 "textStyle": {"color": ACADEMIC_COLORS['secondary']}
             },
             "series": [{
                 "name": "Interface Residues",
                 "type": "pie",
                 "radius": ["42%", "68%"],
-                "center": ["50%", "50%"],
+                "center": ["50%", "48%"],
                 "avoidLabelOverlap": True,
                 "itemStyle": {
                     "borderRadius": 4,
                     "borderColor": "#fff",
                     "borderWidth": 2
                 },
-                "label": {"show": True, "color": ACADEMIC_COLORS['secondary']},
+                "label": {
+                    "show": True,
+                    "color": ACADEMIC_COLORS['secondary'],
+                    "overflow": "break",
+                    "width": 96,
+                },
                 "data": [{"value": v, "name": k} for k, v in counts.items()]
             }],
             "color": ACADEMIC_COLORS['category']
@@ -774,21 +819,25 @@ class ResultVisualizer:
                 "position": "top",
                 "formatter": "Receptor:{b}<br/>Ligand:{c}<br/>Strength:{d}"
             },
-            "grid": {"left": "10%", "right": "10%", "bottom": "15%", "top": "15%"},
+            "grid": self._echarts_grid(top=82, right=58, bottom=118, left=94),
             "xAxis": {
                 "type": "category",
                 "data": [str(i) for i in range(n_cols)],
                 "name": "Ligand Residue Index",
-                "nameTextStyle": {"color": ACADEMIC_COLORS['gray']},
-                "axisLabel": {"color": ACADEMIC_COLORS['secondary'], "interval": 5},
+                "nameLocation": "middle",
+                "nameGap": 38,
+                "nameTextStyle": self._axis_name_style(),
+                "axisLabel": {**self._axis_label_style(), "interval": "auto"},
                 "splitArea": {"show": True}
             },
             "yAxis": {
                 "type": "category",
                 "data": [str(i) for i in range(n_rows)],
                 "name": "Receptor Residue Index",
-                "nameTextStyle": {"color": ACADEMIC_COLORS['gray']},
-                "axisLabel": {"color": ACADEMIC_COLORS['secondary'], "interval": 5},
+                "nameLocation": "middle",
+                "nameGap": 58,
+                "nameTextStyle": self._axis_name_style(),
+                "axisLabel": {**self._axis_label_style(), "interval": "auto"},
                 "splitArea": {"show": True}
             },
             "visualMap": {
@@ -797,7 +846,7 @@ class ResultVisualizer:
                 "calculable": True,
                 "orient": "horizontal",
                 "left": "center",
-                "bottom": "0%",
+                "bottom": 16,
                 "textStyle": {"color": ACADEMIC_COLORS['secondary']},
                 "inRange": {"color": ['#e8f4f8', '#9fd5e8', '#3498db', '#2980b9']}
             },

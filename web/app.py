@@ -7,6 +7,7 @@ import json
 import sys
 from pathlib import Path
 
+import joblib
 import pandas as pd
 import streamlit as st
 from streamlit.components.v1 import html
@@ -16,6 +17,8 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from docking.docking import ProteinDocker
 from docking.interface import InterfaceAnalyzer
+from docking.ml_reranker import load_pose_reranker
+from docking.model_training import train_pose_reranker_frame
 from docking.ppi_predictor import PPIPredictor
 from docking.structure import split_complex_by_reference_chains
 from docking.visualization import ResultVisualizer
@@ -28,6 +31,119 @@ st.set_page_config(
     layout="wide",
 )
 
+st.markdown(
+    """
+    <style>
+      .block-container {
+        max-width: 1500px;
+        padding-top: 5.25rem;
+        padding-bottom: 2rem;
+      }
+
+      .ppi-topbar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 1000000;
+        min-height: 58px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0.55rem 1.25rem;
+        background: rgba(255, 255, 255, 0.96);
+        border-bottom: 1px solid rgba(49, 51, 63, 0.14);
+        backdrop-filter: blur(10px);
+      }
+
+      .ppi-topbar-inner {
+        width: min(1500px, 100%);
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 1rem;
+        align-items: center;
+      }
+
+      .ppi-topbar-title {
+        min-width: 0;
+      }
+
+      .ppi-topbar-title h1 {
+        margin: 0;
+        font-size: 1.35rem;
+        line-height: 1.2;
+        font-weight: 700;
+        color: rgb(38, 39, 48);
+      }
+
+      .ppi-topbar-title p {
+        margin: 0.2rem 0 0;
+        font-size: 0.86rem;
+        color: rgba(49, 51, 63, 0.72);
+        overflow-wrap: anywhere;
+      }
+
+      .ppi-lang-button {
+        min-width: 76px;
+        min-height: 36px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0 0.9rem;
+        border: 1px solid rgba(49, 51, 63, 0.2);
+        border-radius: 8px;
+        background: rgb(255, 255, 255);
+        color: rgb(38, 39, 48);
+        font-weight: 600;
+        font-size: 0.9rem;
+        text-decoration: none;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+      }
+
+      div[data-testid="stMetric"] {
+        min-height: 88px;
+      }
+
+      div[data-testid="stMetric"] > div {
+        overflow-wrap: anywhere;
+      }
+
+      div[data-testid="stDataFrame"] {
+        margin-top: 0.35rem;
+      }
+
+      .stTabs [data-baseweb="tab-panel"] {
+        padding-top: 1rem;
+      }
+
+      iframe {
+        display: block;
+        max-width: 100%;
+      }
+
+      @media (max-width: 720px) {
+        .block-container {
+          padding-top: 6.25rem;
+        }
+
+        .ppi-topbar-inner {
+          grid-template-columns: minmax(0, 1fr) auto;
+          gap: 0.75rem;
+        }
+
+        .ppi-topbar-title h1 {
+          font-size: 1rem;
+        }
+
+        .ppi-topbar-title p {
+          font-size: 0.76rem;
+        }
+      }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 # ECharts CDN URL
 ECHARTS_CDN = "https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"
 
@@ -37,6 +153,7 @@ TEXT = {
         "app_title": "🧬 PPI Docking - 蛋白质互作预测",
         "app_subtitle": "自主实现的蛋白-蛋白分子对接与互作位点预测系统",
         "tab_dock": "分子对接",
+        "tab_train": "模型训练",
         "tab_bench": "Benchmark",
         "tab_about": "关于",
         "receptor_file": "受体 PDB 文件",
@@ -46,6 +163,8 @@ TEXT = {
         "example_source": "来源: RCSB PDB {pdb_id} · {description} · {source_url}",
         "example_description": "RCSB PDB 已知互作复合物。",
         "top_n": "输出 Top N 构象",
+        "reranker_model_path": "自定义 pose reranker 模型路径（可选）",
+        "reranker_model_help": "留空时使用 config.yaml 中的默认模型；可填写训练得到的 .joblib 路径。",
         "start_docking": "开始对接分析",
         "using_example": "使用示例结构: {display_name} ({receptor}, {ligand})",
         "input_error": "请上传 PDB 文件或勾选使用示例结构",
@@ -82,6 +201,17 @@ TEXT = {
         "run_benchmark": "运行 Benchmark",
         "benchmark_spinner": "运行 benchmark（可能需要几分钟）...",
         "benchmark_complete": "完成 {count} 个测试",
+        "train_title": "### 训练 Pose Reranker",
+        "train_description": "上传由 `scripts/build_pose_training_set.py` 或你自己的流程生成的 pose 特征 CSV，训练后可保存为默认模型用于后续对接排序。",
+        "train_csv": "训练 CSV",
+        "train_model_type": "模型算法",
+        "train_mode": "训练目标类型",
+        "train_target": "目标列",
+        "train_default_model": "保存为默认模型",
+        "train_button": "开始训练模型",
+        "train_success": "模型训练完成，已保存到 {path}",
+        "download_model": "下载训练模型",
+        "download_metrics": "下载训练指标",
         "about": """
 ## 算法原理
 
@@ -115,6 +245,7 @@ $$Score = w_H \\cdot H + w_E \\cdot E + w_C \\cdot C + w_A \\cdot A - w_P \\cdot
         "app_title": "🧬 PPI Docking - Protein Interaction Prediction",
         "app_subtitle": "An independent protein-protein docking and interaction-site prediction system",
         "tab_dock": "Docking",
+        "tab_train": "Model Training",
         "tab_bench": "Benchmark",
         "tab_about": "About",
         "receptor_file": "Receptor PDB File",
@@ -124,6 +255,8 @@ $$Score = w_H \\cdot H + w_E \\cdot E + w_C \\cdot C + w_A \\cdot A - w_P \\cdot
         "example_source": "Source: RCSB PDB {pdb_id} · {description} · {source_url}",
         "example_description": "Known interacting complex from RCSB PDB.",
         "top_n": "Number of Top Poses",
+        "reranker_model_path": "Custom pose reranker model path (optional)",
+        "reranker_model_help": "Leave blank to use the model configured in config.yaml; provide a trained .joblib path to override it.",
         "start_docking": "Start Docking Analysis",
         "using_example": "Using example: {display_name} ({receptor}, {ligand})",
         "input_error": "Upload receptor and ligand PDB files or select the built-in example",
@@ -160,6 +293,17 @@ $$Score = w_H \\cdot H + w_E \\cdot E + w_C \\cdot C + w_A \\cdot A - w_P \\cdot
         "run_benchmark": "Run Benchmark",
         "benchmark_spinner": "Running benchmark (this may take a few minutes)...",
         "benchmark_complete": "Completed {count} tests",
+        "train_title": "### Train Pose Reranker",
+        "train_description": "Upload a pose-feature CSV generated by `scripts/build_pose_training_set.py` or your own workflow, then save the trained model for docking-time reranking.",
+        "train_csv": "Training CSV",
+        "train_model_type": "Model Algorithm",
+        "train_mode": "Training Target Type",
+        "train_target": "Target Column",
+        "train_default_model": "Save as default model",
+        "train_button": "Train Model",
+        "train_success": "Model trained and saved to {path}",
+        "download_model": "Download Model",
+        "download_metrics": "Download Metrics",
         "about": """
 ## Method
 
@@ -272,6 +416,7 @@ def localize_echarts_option(value):
 
 def render_echarts(option_json, width="100%", height="500px"):
     """渲染 ECharts 图表"""
+    height_px = int(str(height).replace("px", ""))
     try:
         option_json = json.dumps(
             localize_echarts_option(json.loads(option_json)),
@@ -286,7 +431,7 @@ def render_echarts(option_json, width="100%", height="500px"):
         <meta charset="utf-8">
         <script src="%s"></script>
         <style>
-            body { margin: 0; padding: 0; overflow: hidden; }
+            html, body { margin: 0; padding: 0; overflow: hidden; background: transparent; }
             #chart { width: %s; height: %s; }
         </style>
     </head>
@@ -295,15 +440,18 @@ def render_echarts(option_json, width="100%", height="500px"):
         <script type="text/javascript">
             var chart = echarts.init(document.getElementById('chart'));
             var option = %s;
-            chart.setOption(option);
+            chart.setOption(option, true);
             window.addEventListener('resize', function() {
                 chart.resize();
             });
+            if (window.ResizeObserver) {
+                new ResizeObserver(function() { chart.resize(); }).observe(document.getElementById('chart'));
+            }
         </script>
     </body>
     </html>
     """ % (ECHARTS_CDN, width, height, option_json)
-    return html(html_code, scrolling=False, height=int(height.replace('px','')))
+    return html(html_code, scrolling=False, height=height_px)
 
 
 def get_docked_ligand_structure(receptor, ligand, pose):
@@ -352,18 +500,32 @@ def ensure_state_defaults():
 
 ensure_state_defaults()
 
-title_col, language_col = st.columns([10, 1])
-with language_col:
-    switch_label = "EN" if st.session_state.language == "zh" else "中文"
-    if st.button(switch_label, key="language_toggle", help=tr("language_help"), use_container_width=True):
-        st.session_state.language = "en" if st.session_state.language == "zh" else "zh"
-        st.rerun()
-with title_col:
-    st.title(tr("app_title"))
+query_language = st.query_params.get("language")
+if isinstance(query_language, list):
+    query_language = query_language[0] if query_language else None
+if query_language in ("zh", "en") and query_language != st.session_state.language:
+    st.session_state.language = query_language
 
-st.markdown(tr("app_subtitle"))
+next_language = "en" if st.session_state.language == "zh" else "zh"
+switch_label = "EN" if st.session_state.language == "zh" else "中文"
+st.markdown(
+    f"""
+    <div class="ppi-topbar">
+      <div class="ppi-topbar-inner">
+        <div class="ppi-topbar-title">
+          <h1>{tr("app_title")}</h1>
+          <p>{tr("app_subtitle")}</p>
+        </div>
+        <a class="ppi-lang-button" href="?language={next_language}" title="{tr("language_help")}">{switch_label}</a>
+      </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
-tab_dock, tab_bench, tab_about = st.tabs([tr("tab_dock"), tr("tab_bench"), tr("tab_about")])
+tab_dock, tab_train, tab_bench, tab_about = st.tabs(
+    [tr("tab_dock"), tr("tab_train"), tr("tab_bench"), tr("tab_about")]
+)
 
 with tab_dock:
     col1, col2 = st.columns(2)
@@ -401,6 +563,11 @@ with tab_dock:
         )
 
     top_n = st.slider(tr("top_n"), 1, 10, 5)
+    custom_reranker_path = st.text_input(
+        tr("reranker_model_path"),
+        value="",
+        help=tr("reranker_model_help"),
+    )
     run_btn = st.button(tr("start_docking"), type="primary")
 
     if run_btn:
@@ -434,6 +601,11 @@ with tab_dock:
         with st.spinner(tr("docking_spinner")):
             docker = ProteinDocker(config_path)
             docker.top_n = top_n
+            if custom_reranker_path.strip():
+                docker.pose_reranker = load_pose_reranker(
+                    custom_reranker_path.strip(),
+                    docker.reranker_weight,
+                )
             poses, receptor, ligand = docker.dock(rec_path, lig_path, output_dir)
 
         if not poses:
@@ -494,12 +666,12 @@ with tab_dock:
              tr("col_clash"): p.scores.clash_penalty}
             for p in poses[:top_n]
         ])
-        st.dataframe(score_df, use_container_width=True)
+        st.dataframe(score_df, width="stretch", height=240)
 
         st.subheader(tr("interface_residue_table"))
         interface_analyzer = InterfaceAnalyzer()
         iface_df = localize_interface_dataframe(interface_analyzer.to_dataframe(interface))
-        st.dataframe(iface_df, use_container_width=True)
+        st.dataframe(iface_df, width="stretch", height=320)
 
         st.markdown("---")
         chart_col1, chart_col2 = st.columns(2, gap="large")
@@ -507,30 +679,30 @@ with tab_dock:
             st.subheader(f"📊 {tr('score_ranking')}")
             echarts_option = viz.get_docking_scores_echarts(poses[:top_n])
             if echarts_option != "{}":
-                render_echarts(echarts_option, height="420px")
+                render_echarts(echarts_option, height="460px")
         with chart_col2:
             st.subheader(f"📈 {tr('score_components')}")
             echarts_option = viz.get_score_components_echarts(best)
             if echarts_option != "{}":
-                render_echarts(echarts_option, height="420px")
+                render_echarts(echarts_option, height="460px")
 
         chart_col3, chart_col4 = st.columns(2, gap="large")
         with chart_col3:
             st.subheader(f"🔬 {tr('interface_distribution')}")
             echarts_option = viz.get_interface_distribution_echarts(interface)
             if echarts_option != "{}":
-                render_echarts(echarts_option, height="420px")
+                render_echarts(echarts_option, height="460px")
         with chart_col4:
             st.subheader(f"📉 {tr('distance_distribution')}")
             echarts_option = viz.get_distance_distribution_echarts(interface)
             if echarts_option != "{}":
-                render_echarts(echarts_option, height="420px")
+                render_echarts(echarts_option, height="460px")
 
         st.markdown("---")
         st.subheader(f"🔥 {tr('contact_map')}")
         echarts_option = viz.get_contact_map_echarts(interface)
         if echarts_option != "{}":
-            render_echarts(echarts_option, height="520px")
+            render_echarts(echarts_option, height="620px")
 
         # 3D 结构可视化
         st.markdown("---")
@@ -577,7 +749,7 @@ with tab_dock:
                 metrics=viewer_metrics,
                 language=st.session_state.language,
             )
-            viewer_html = render_structure_viewer(viewer_payload, height_px=700)
+            viewer_html = render_structure_viewer(viewer_payload, height_px=860)
 
             # 显示选中构象的评分信息
             col1, col2, col3, col4 = st.columns(4)
@@ -595,7 +767,8 @@ with tab_dock:
             st.subheader(tr("selected_interface"))
             st.dataframe(
                 localize_interface_dataframe(InterfaceAnalyzer().to_dataframe(selected_interface)),
-                use_container_width=True,
+                width="stretch",
+                height=320,
             )
 
             col1, col2 = st.columns(2)
@@ -613,6 +786,66 @@ with tab_dock:
                     file_name=f"structure_3d_rank{selected_rank}.html",
                     help=tr("download_html_help"),
                 )
+
+with tab_train:
+    st.markdown(tr("train_title"))
+    st.markdown(tr("train_description"))
+    training_csv = st.file_uploader(tr("train_csv"), type=["csv"], key="pose_training_csv")
+    train_col1, train_col2, train_col3 = st.columns(3)
+    with train_col1:
+        train_model_type = st.selectbox(
+            tr("train_model_type"),
+            options=["random_forest", "mlp"],
+            format_func=lambda value: "Random Forest" if value == "random_forest" else "MLP",
+        )
+    with train_col2:
+        train_mode = st.selectbox(
+            tr("train_mode"),
+            options=["classification", "regression"],
+            format_func=lambda value: "Classification" if value == "classification" else "Regression",
+        )
+    with train_col3:
+        train_target = st.text_input(tr("train_target"), value="acceptable")
+    save_default_model = st.checkbox(tr("train_default_model"), value=True)
+
+    if st.button(tr("train_button"), type="primary", disabled=training_csv is None):
+        if training_csv is None:
+            st.stop()
+        try:
+            frame = pd.read_csv(training_csv)
+            result = train_pose_reranker_frame(
+                frame,
+                mode=train_mode,
+                model_type=train_model_type,
+                target=train_target.strip() or "acceptable",
+            )
+            models_dir = PROJECT_ROOT / "models"
+            models_dir.mkdir(parents=True, exist_ok=True)
+            model_path = (
+                models_dir / "default_pose_reranker.joblib"
+                if save_default_model
+                else models_dir / "web_pose_reranker.joblib"
+            )
+            metrics_path = model_path.with_suffix(".metrics.json")
+            joblib.dump(result.model, model_path)
+            metrics_path.write_text(
+                json.dumps(result.metrics, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            st.success(tr("train_success", path=model_path))
+            st.json(result.metrics)
+            st.download_button(
+                tr("download_model"),
+                model_path.read_bytes(),
+                file_name=model_path.name,
+            )
+            st.download_button(
+                tr("download_metrics"),
+                metrics_path.read_text(encoding="utf-8"),
+                file_name=metrics_path.name,
+            )
+        except Exception as exc:
+            st.error(str(exc))
 
 with tab_bench:
     st.markdown(tr("benchmark_title"))

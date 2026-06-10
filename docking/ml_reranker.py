@@ -27,6 +27,10 @@ POSE_FEATURES = [
     "prior_score",
     "search_score",
     "cluster_size",
+    "mean_contact_distance",
+    "contact_density",
+    "interface_balance",
+    "residue_pair_count",
 ]
 
 
@@ -47,6 +51,10 @@ def pose_feature_dict(pose: DockingPose) -> Dict[str, float]:
         "prior_score": float(scores.prior_score),
         "search_score": float(pose.search_score),
         "cluster_size": float(pose.cluster_size),
+        "mean_contact_distance": float(scores.mean_contact_distance),
+        "contact_density": float(scores.contact_density),
+        "interface_balance": float(scores.interface_balance),
+        "residue_pair_count": float(scores.residue_pair_count),
     }
 
 
@@ -68,7 +76,12 @@ class PoseReranker:
     def predict(self, poses: List[DockingPose]) -> np.ndarray:
         if not poses:
             return np.zeros(0, dtype=float)
-        return np.asarray(self.model.predict(pose_feature_matrix(poses)), dtype=float)
+        features = pose_feature_matrix(poses)
+        if hasattr(self.model, "predict_proba"):
+            probabilities = self.model.predict_proba(features)
+            if probabilities.ndim == 2 and probabilities.shape[1] > 1:
+                return np.asarray(probabilities[:, 1], dtype=float)
+        return np.asarray(self.model.predict(features), dtype=float)
 
     def rank_poses(self, poses: List[DockingPose]) -> List[DockingPose]:
         predictions = self.predict(poses)

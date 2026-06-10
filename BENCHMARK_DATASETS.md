@@ -31,17 +31,20 @@ Use DB5.5 first. Keep it independent from training.
 ```powershell
 python scripts/collect_reliable_ppi_benchmarks.py db55 `
   --out data/reliable_ppi/db55 `
-  --limit 50 `
-  --download-pdb `
-  --split-bound
+  --download-archive `
+  --extract-archive `
+  --download-table
 ```
 
 Outputs:
 
 - `manifest.json`: parsed DB5.5 bound complex IDs, receptor chains, ligand chains, categories.
 - `manifest.csv`: spreadsheet-friendly manifest.
-- `pdb/`: downloaded RCSB PDB files when `--download-pdb` is used.
-- `pairs/`: receptor/ligand bound-chain split files when `--split-bound` is used.
+- `benchmark5.5.tgz`: official cleaned-up DB5.5 PDB archive from Weng lab.
+- `Table_BM5.5.xlsx`: official case table.
+- `archive/`: safely extracted official structures when `--extract-archive` is used.
+- `pdb/`: downloaded RCSB PDB files when `--download-pdb` is additionally used.
+- `pairs/`: receptor/ligand bound-chain split files when `--split-bound` is additionally used.
 
 For final reporting, run docking in strict blind mode on this set and compute:
 
@@ -66,19 +69,36 @@ Recommended features:
 Train a reranker:
 
 ```powershell
+python scripts/build_pose_training_set.py `
+  --manifest data/reliable_ppi/db55/manifest.json `
+  --out results/benchmark/pose_training_rows.csv `
+  --blind `
+  --top-n 10 `
+  --include-native-pose
+
 python scripts/train_pose_reranker.py `
   --input results/benchmark/pose_training_rows.csv `
-  --model-out models/pose_reranker.joblib `
-  --target dockq
+  --model-out models/default_pose_reranker.joblib `
+  --model-type random_forest
 ```
 
 Then enable it in `config.yaml`:
 
 ```yaml
 docking:
-  reranker_model: models/pose_reranker.joblib
-  reranker_weight: 1.0
+  reranker_model: models/default_pose_reranker.joblib
+  reranker_weight: 40.0
 ```
+
+User-provided training manifests should use this CSV schema:
+
+```csv
+case_id,receptor_path,ligand_path,native_complex_path,receptor_chains,ligand_chains
+case_001,data/user/case_001_rec.pdb,data/user/case_001_lig.pdb,data/user/case_001_native.pdb,A,B
+```
+
+The same `build_pose_training_set.py` command accepts this user CSV and emits the
+same pose-feature rows used by `train_pose_reranker.py`.
 
 ### Phase 3: Large-Scale Interface Learning
 

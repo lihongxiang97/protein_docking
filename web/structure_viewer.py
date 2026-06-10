@@ -23,6 +23,12 @@ VIEWER_LABELS = {
         "focus_interface": "聚焦界面",
         "global_view": "全局视图",
         "auto_spin": "自动旋转",
+        "export_format": "图片格式",
+        "export_image": "保存高清图",
+        "export_png": "PNG",
+        "export_jpg": "JPG",
+        "exporting_image": "正在保存...",
+        "export_image_failed": "图片保存失败：",
         "interface_sticks": "界面 sticks",
         "contact_lines": "接触连线",
         "cofactors": "辅因子",
@@ -57,6 +63,12 @@ VIEWER_LABELS = {
         "focus_interface": "Focus Interface",
         "global_view": "Global View",
         "auto_spin": "Auto Spin",
+        "export_format": "Image Format",
+        "export_image": "Save HD Image",
+        "export_png": "PNG",
+        "export_jpg": "JPG",
+        "exporting_image": "Saving...",
+        "export_image_failed": "Failed to save image: ",
         "interface_sticks": "Interface sticks",
         "contact_lines": "Contact lines",
         "cofactors": "Cofactors",
@@ -266,19 +278,17 @@ def build_structure_viewer_html(payload: Dict[str, object], height_px: int = 760
         height: __HEIGHT_PX__px;
         min-height: 0;
         display: grid;
-        grid-template-columns: minmax(0, 1fr) 320px;
+        grid-template-columns: minmax(0, 1fr) 360px;
         overflow: hidden;
-        background:
-          radial-gradient(circle at top left, rgba(103, 168, 255, 0.08), transparent 28%),
-          radial-gradient(circle at bottom right, rgba(255, 180, 94, 0.08), transparent 28%),
-          var(--bg-app);
+        background: var(--bg-app);
         border: 1px solid var(--border);
+        border-radius: 8px;
       }
 
-      @media (max-width: 960px) {
+      @media (max-width: 720px) {
         .viewer-shell {
           grid-template-columns: 1fr;
-          grid-template-rows: minmax(420px, 1fr) auto;
+          grid-template-rows: minmax(560px, 1fr) auto;
           height: auto;
         }
       }
@@ -289,9 +299,9 @@ def build_structure_viewer_html(payload: Dict[str, object], height_px: int = 760
         border-right: 1px solid var(--border);
       }
 
-      @media (max-width: 960px) {
+      @media (max-width: 720px) {
         .viewer-pane {
-          min-height: 460px;
+          min-height: 560px;
           border-right: none;
           border-bottom: 1px solid var(--border);
         }
@@ -310,6 +320,7 @@ def build_structure_viewer_html(payload: Dict[str, object], height_px: int = 760
         padding: 10px 12px;
         background: rgba(10, 16, 28, 0.72);
         border: 1px solid var(--border);
+        border-radius: 8px;
         backdrop-filter: blur(12px);
       }
 
@@ -333,7 +344,8 @@ def build_structure_viewer_html(payload: Dict[str, object], height_px: int = 760
         border-radius: 8px;
         padding: 7px 10px;
         font-size: 12px;
-        line-height: 1;
+        line-height: 1.15;
+        min-height: 30px;
       }
 
       .toolbar button {
@@ -344,6 +356,19 @@ def build_structure_viewer_html(payload: Dict[str, object], height_px: int = 760
         border-color: rgba(103, 168, 255, 0.55);
         color: var(--receptor);
         background: rgba(103, 168, 255, 0.08);
+      }
+
+      .toolbar button:disabled {
+        cursor: progress;
+        opacity: 0.62;
+      }
+
+      .toolbar .export-group {
+        margin-left: auto;
+      }
+
+      #btn-export-image {
+        min-width: 98px;
       }
 
       .toolbar .toggle {
@@ -365,7 +390,7 @@ def build_structure_viewer_html(payload: Dict[str, object], height_px: int = 760
       #viewport {
         width: 100%;
         height: 100%;
-        min-height: 420px;
+        min-height: 560px;
       }
 
       .viewer-hint {
@@ -378,6 +403,7 @@ def build_structure_viewer_html(payload: Dict[str, object], height_px: int = 760
         color: var(--text-muted);
         background: rgba(9, 15, 26, 0.74);
         border: 1px solid var(--border);
+        border-radius: 8px;
       }
 
       .analysis-pane {
@@ -388,7 +414,8 @@ def build_structure_viewer_html(payload: Dict[str, object], height_px: int = 760
         flex-direction: column;
         gap: 12px;
         padding: 14px;
-        overflow: hidden;
+        overflow-x: hidden;
+        overflow-y: auto;
         background: var(--bg-panel);
       }
 
@@ -415,6 +442,7 @@ def build_structure_viewer_html(payload: Dict[str, object], height_px: int = 760
         padding: 10px;
         background: var(--bg-elevated);
         border: 1px solid var(--border);
+        border-radius: 8px;
       }
 
       .metric-label {
@@ -434,6 +462,7 @@ def build_structure_viewer_html(payload: Dict[str, object], height_px: int = 760
         overflow: hidden;
         border: 1px solid var(--border);
         background: rgba(16, 25, 38, 0.92);
+        border-radius: 8px;
       }
 
       .panel:has(.contacts-table-wrap) {
@@ -468,6 +497,7 @@ def build_structure_viewer_html(payload: Dict[str, object], height_px: int = 760
         padding: 8px;
         border: 1px solid var(--border);
         background: rgba(255, 255, 255, 0.015);
+        border-radius: 6px;
       }
 
       .stat-row strong {
@@ -496,6 +526,7 @@ def build_structure_viewer_html(payload: Dict[str, object], height_px: int = 760
         padding: 8px 10px;
         background: rgba(255, 255, 255, 0.02);
         border: 1px solid var(--border);
+        border-radius: 6px;
         font-size: 12px;
       }
 
@@ -570,6 +601,7 @@ def build_structure_viewer_html(payload: Dict[str, object], height_px: int = 760
         min-width: 72px;
         padding: 3px 8px;
         border: 1px solid var(--border-strong);
+        border-radius: 6px;
         font-size: 10px;
         text-transform: uppercase;
       }
@@ -585,9 +617,22 @@ def build_structure_viewer_html(payload: Dict[str, object], height_px: int = 760
         color: var(--text-muted);
       }
 
-      @media (max-width: 960px) {
+      @media (max-width: 720px) {
         .viewer-shell {
           overflow: visible;
+        }
+
+        .toolbar {
+          position: relative;
+          top: auto;
+          left: auto;
+          right: auto;
+          margin: 10px;
+        }
+
+        #viewport {
+          height: 520px;
+          min-height: 520px;
         }
 
         .analysis-pane {
@@ -622,6 +667,14 @@ def build_structure_viewer_html(payload: Dict[str, object], height_px: int = 760
             <label class="toggle"><input type="checkbox" id="toggle-interface" checked /><span id="toggle-interface-label"></span></label>
             <label class="toggle"><input type="checkbox" id="toggle-contacts" checked /><span id="toggle-contacts-label"></span></label>
             <label class="toggle"><input type="checkbox" id="toggle-hetero" /><span id="toggle-hetero-label"></span></label>
+          </div>
+          <div class="toolbar-group export-group">
+            <label for="export-format" id="export-format-label"></label>
+            <select id="export-format">
+              <option value="png" id="export-png"></option>
+              <option value="jpg" id="export-jpg"></option>
+            </select>
+            <button type="button" id="btn-export-image"></button>
           </div>
         </div>
         <div id="viewport"></div>
@@ -729,6 +782,10 @@ def build_structure_viewer_html(payload: Dict[str, object], height_px: int = 760
           "btn-focus-interface": labels.focus_interface,
           "btn-reset-view": labels.global_view,
           "btn-spin": labels.auto_spin,
+          "export-format-label": labels.export_format,
+          "export-png": labels.export_png,
+          "export-jpg": labels.export_jpg,
+          "btn-export-image": labels.export_image,
           "toggle-interface-label": labels.interface_sticks,
           "toggle-contacts-label": labels.contact_lines,
           "toggle-hetero-label": labels.cofactors,
@@ -852,6 +909,109 @@ def build_structure_viewer_html(payload: Dict[str, object], height_px: int = 760
         }
       }
 
+      function imageFileBase() {
+        const raw = payload.poseTitle || labels.docking_structure || "docked_structure";
+        const safe = String(raw)
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/gi, "_")
+          .replace(/^_+|_+$/g, "");
+        return safe || "docked_structure";
+      }
+
+      function downloadBlob(blob, filename) {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.setTimeout(function() {
+          URL.revokeObjectURL(url);
+        }, 1000);
+      }
+
+      function blobFromImageResult(result) {
+        if (result instanceof Blob) {
+          return Promise.resolve(result);
+        }
+        if (typeof result === "string" && result.startsWith("data:")) {
+          return fetch(result).then(function(response) {
+            return response.blob();
+          });
+        }
+        return Promise.reject(new Error("Unsupported image result"));
+      }
+
+      function convertPngToJpeg(pngBlob) {
+        return new Promise(function(resolve, reject) {
+          const url = URL.createObjectURL(pngBlob);
+          const image = new Image();
+          image.onload = function() {
+            const canvas = document.createElement("canvas");
+            canvas.width = image.naturalWidth || image.width;
+            canvas.height = image.naturalHeight || image.height;
+            const ctx = canvas.getContext("2d");
+            ctx.fillStyle = "#08101b";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(image, 0, 0);
+            canvas.toBlob(function(jpegBlob) {
+              URL.revokeObjectURL(url);
+              if (jpegBlob) resolve(jpegBlob);
+              else reject(new Error("JPEG conversion returned an empty image"));
+            }, "image/jpeg", 0.95);
+          };
+          image.onerror = function() {
+            URL.revokeObjectURL(url);
+            reject(new Error("Could not read the rendered image"));
+          };
+          image.src = url;
+        });
+      }
+
+      function setExportBusy(isBusy) {
+        const button = document.getElementById("btn-export-image");
+        button.disabled = Boolean(isBusy);
+        button.textContent = isBusy ? (labels.exporting_image || "Saving...") : (labels.export_image || "Save HD Image");
+      }
+
+      async function exportHighResolutionImage() {
+        if (!stage || !component || typeof stage.makeImage !== "function") {
+          return;
+        }
+        const format = document.getElementById("export-format").value === "jpg" ? "jpg" : "png";
+        const wasSpinning = spinning;
+        try {
+          setExportBusy(true);
+          if (wasSpinning) {
+            stage.setSpin(false);
+          }
+          stage.handleResize();
+          await new Promise(function(resolve) {
+            requestAnimationFrame(function() {
+              requestAnimationFrame(resolve);
+            });
+          });
+          const result = await stage.makeImage({
+            factor: 4,
+            antialias: true,
+            trim: false,
+            transparent: false
+          });
+          const pngBlob = await blobFromImageResult(result);
+          const blob = format === "jpg" ? await convertPngToJpeg(pngBlob) : pngBlob;
+          downloadBlob(blob, imageFileBase() + "_4x." + format);
+        } catch (error) {
+          console.error(error);
+          window.alert((labels.export_image_failed || "Failed to save image: ") + (error && error.message ? error.message : String(error)));
+        } finally {
+          if (wasSpinning && stage) {
+            stage.setSpin([0.002, 0.001, 0]);
+          }
+          setExportBusy(false);
+        }
+      }
+
       function wireControls() {
         document.getElementById("render-mode").addEventListener("change", function(event) {
           applyRenderMode(event.target.value);
@@ -876,6 +1036,7 @@ def build_structure_viewer_html(payload: Dict[str, object], height_px: int = 760
         document.getElementById("toggle-hetero").addEventListener("change", function(event) {
           setVisibility(reps.hetero, event.target.checked);
         });
+        document.getElementById("btn-export-image").addEventListener("click", exportHighResolutionImage);
       }
 
       function loadStructure() {
@@ -956,6 +1117,10 @@ def build_structure_viewer_html(payload: Dict[str, object], height_px: int = 760
           buildContactShape();
           applyRenderMode(document.getElementById("render-mode").value);
           component.autoView(payload.interface.combinedSelection || undefined);
+          requestAnimationFrame(function() {
+            stage.handleResize();
+            component.autoView(payload.interface.combinedSelection || undefined);
+          });
         }).catch(function(error) {
           console.error(error);
           document.getElementById("contact-table-body").innerHTML =
@@ -977,5 +1142,5 @@ def build_structure_viewer_html(payload: Dict[str, object], height_px: int = 760
 
 def render_structure_viewer(payload: Dict[str, object], height_px: int = 760) -> str:
     html_markup = build_structure_viewer_html(payload, height_px=height_px)
-    html(html_markup, height=height_px, scrolling=False)
+    html(html_markup, height=height_px, scrolling=True)
     return html_markup

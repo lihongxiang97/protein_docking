@@ -138,18 +138,38 @@ Benchmark 输出继续保留原 `rmsd` 字段作为 LRMSD 兼容列，并新增 
 - IntAct/BioGRID：适合 PPI 分类候选，但需要结构映射后才能用于 docking。
 
 新增 `scripts/collect_reliable_ppi_benchmarks.py` 用于解析 DB5.5 官方表格、写出
-manifest，并可按 RCSB PDB 下载和拆分受体/配体链。
+manifest，并可下载官方 `benchmark5.5.tgz` cleaned-up 结构归档、官方 Excel 表格，
+以及按需从 RCSB PDB 下载和拆分 bound 受体/配体链。
 
-新增可选 ML 重排器：
+新增 pose reranker 训练流水线：
+
+1. `scripts/build_pose_training_set.py` 接收 DB5.5 或用户 CSV/JSON manifest。
+2. 对每个 case 执行 docking，收集 Top-N pose 特征。
+3. 用 `docking.metrics.evaluate_complex` 计算 LRMSD、iRMSD、FNAT、DockQ 和 CAPRI class。
+4. 可用 `--include-native-pose` 为每个 case 加入 bound-native 正样本锚点，避免
+   严格盲对接 decoy 全为负样本。
+5. 写出 `acceptable` 标签，作为分类器监督信号。
+6. `scripts/train_pose_reranker.py` 训练 Random Forest 或 MLP 神经网络。
+
+用户自定义 manifest CSV 格式：
+
+```csv
+case_id,receptor_path,ligand_path,native_complex_path,receptor_chains,ligand_chains
+case_001,data/user/case_001_rec.pdb,data/user/case_001_lig.pdb,data/user/case_001_native.pdb,A,B
+```
+
+默认 ML 重排器配置：
 
 ```yaml
 docking:
-  reranker_model: models/pose_reranker.joblib
-  reranker_weight: 1.0
+  reranker_model: models/default_pose_reranker.joblib
+  reranker_weight: 40.0
 ```
 
-默认不启用该模型。训练数据应来自独立 benchmark/decoy 运行，并使用 DockQ 或
-CAPRI class 作为监督标签，避免把最终测试集泄漏到训练中。
+若模型文件不存在，软件自动退回经验评分；一旦训练并保存
+`models/default_pose_reranker.joblib`，命令行和 Web 端都会默认使用该模型。训练数据
+应划分 train/validation/test，并保留一部分 DB5.5 或 DOCKGROUND case 作为最终盲测，
+避免把最终测试集泄漏到训练中。
 
 ## 尚未完成
 

@@ -24,6 +24,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from docking.docking import ProteinDocker
 from docking.config import load_config as load_validated_config
 from docking.interface import InterfaceAnalyzer
+from docking.ml_reranker import load_pose_reranker
 from docking.ppi_predictor import PPIPredictor
 from docking.preprocess import StructurePreprocessor
 from docking.structure import split_complex_by_reference_chains
@@ -78,6 +79,8 @@ def run_docking(args: argparse.Namespace) -> int:
     try:
         docker = ProteinDocker(config_path)
         docker.top_n = args.top_n
+        if args.reranker_model:
+            docker.pose_reranker = load_pose_reranker(args.reranker_model, args.reranker_weight)
         if args.blind:
             docker.include_input_pose = False
             docker.input_pose_bonus = 0.0
@@ -269,6 +272,8 @@ def main():
     parser.add_argument("--receptor-chains", type=str, help="受体链 ID (逗号分隔)")
     parser.add_argument("--ligand-chains", type=str, help="配体链 ID (逗号分隔)")
     parser.add_argument("--top-n", type=int, default=10, help="输出 Top N 构象")
+    parser.add_argument("--reranker-model", type=str, help="覆盖配置中的 pose reranker 模型路径")
+    parser.add_argument("--reranker-weight", type=float, default=40.0, help="自定义 reranker 加权系数")
     parser.add_argument("--blind", action="store_true", help="禁用输入相对构象先验，执行纯盲搜")
     parser.add_argument("--rotations", type=int, help="覆盖全局旋转采样数量")
     parser.add_argument("--mc-iterations", type=int, help="覆盖局部精修迭代数")
